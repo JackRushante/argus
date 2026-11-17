@@ -437,6 +437,28 @@ class DraftValidatorTest {
         val e = errors(v.validate(d, emptySet()))
         assertTrue("cron_invalid" in e); assertTrue("state_key_unknown" in e)
     }
+    @Test fun `a cron on a date that never occurs is rejected with its own code`() {
+        val at2026 = DraftValidator(
+            knownTools = setOf("whatsapp_reply", "notify.show", "state.read"),
+            clock = java.time.Clock.fixed(java.time.Instant.parse("2026-07-01T00:00:00Z"), java.time.ZoneOffset.UTC),
+        )
+        fun codes(cron: String) = errors(
+            at2026.validate(
+                AutomationDraft(
+                    "x",
+                    Trigger.Time(cron = cron, tz = "Europe/Rome"),
+                    listOf(Action.ShowNotification("t", "x")),
+                ),
+                emptySet(),
+            ),
+        )
+        assertEquals(listOf("cron_never_fires"), codes("0 9 30 2 *"))
+        assertEquals(listOf("cron_never_fires"), codes("0 9 31 4 *"))
+        // 29 febbraio: il 2028 è entro l'orizzonte di ricerca.
+        assertEquals(emptyList(), codes("0 9 29 2 *"))
+        // Un cron non valido resta cron_invalid, senza un secondo errore.
+        assertEquals(listOf("cron_invalid"), codes("0 9 32 2 *"))
+    }
     @Test fun `immediate trigger with valid actions has no trigger errors`() {
         val d = AutomationDraft(
             name = "sveglia adesso",
@@ -491,7 +513,7 @@ class DraftValidatorTest {
         assertTrue("no_actions" in errors(issues))
         assertTrue(issues.any { it.severity == Severity.WARNING && it.code == "radius_small" })
     }
-    @Test fun `dwell and loitering stay fail closed while framework geofence only supports enter exit`() {
+    @Test fun `dwell needs its delay and enter exit never have one`() {
         val dwell = AutomationDraft(
             "dwell",
             Trigger.Geofence(
@@ -502,9 +524,10 @@ class DraftValidatorTest {
             ),
             listOf(Action.SetWifi(false)),
         )
-        val dwellErrors = errors(v.validate(dwell, emptySet()))
-        assertTrue("geofence_transition_unsupported" in dwellErrors)
-        assertTrue("geofence_loitering_unsupported" in dwellErrors)
+        // 0.8: DWELL è disponibile (1..120 minuti); i dettagli in PhysicalTriggers08Test.
+        assertEquals(emptyList(), errors(v.validate(dwell, emptySet())))
+        val noDelay = dwell.copy(trigger = (dwell.trigger as Trigger.Geofence).copy(loiteringDelayMs = 0))
+        assertEquals(listOf("loitering_invalid"), errors(v.validate(noDelay, emptySet())))
 
         val enterWithFakeLoitering = dwell.copy(
             trigger = (dwell.trigger as Trigger.Geofence).copy(

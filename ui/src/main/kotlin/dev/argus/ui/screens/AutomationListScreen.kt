@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
@@ -24,8 +25,10 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.Pending
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +36,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,9 +52,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
+import dev.argus.ui.components.ArgusButton
 import dev.argus.ui.components.ArgusCard
 import dev.argus.ui.components.ArgusLargeTopBar
+import dev.argus.ui.components.ButtonStyle
 import dev.argus.ui.components.ArgusListRow
+import dev.argus.ui.components.ArgusSearchField
 import dev.argus.ui.components.ArgusSegmentedFilter
 import dev.argus.ui.components.ArgusSwitch
 import dev.argus.ui.components.EmptyState
@@ -57,6 +67,9 @@ import dev.argus.ui.components.GroupPosition
 import dev.argus.ui.components.HeroCounter
 import dev.argus.ui.components.HeroTile
 import dev.argus.ui.components.HeroTone
+import dev.argus.ui.components.LabelFilterChip
+import dev.argus.ui.components.LabelGroupCard
+import dev.argus.ui.components.LabelTag
 import dev.argus.ui.components.PauseBanner
 import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.components.StatusChip
@@ -71,12 +84,15 @@ import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.AutomationListState
 import dev.argus.ui.model.AutomationRow
 import dev.argus.ui.model.EngineBanner
+import dev.argus.ui.model.LabelChipUi
 import dev.argus.ui.model.ListSummary
 import dev.argus.ui.model.NextFireSummary
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.TodayErrorsSummary
 import dev.argus.ui.model.iconFor
+import dev.argus.ui.presentation.RuleSearch
+import dev.argus.engine.model.RuleLabels
 import dev.argus.ui.theme.ArgusSpacing
 import dev.argus.ui.theme.ArgusTheme
 
@@ -84,6 +100,9 @@ import dev.argus.ui.theme.ArgusTheme
 // Schermo Automazioni · lista (handoff §6.2, design §7.2; redesign A, tavola «Automazioni»).
 // Dall'alto: titolo, banner salute (tappabile verso Sistema), riepilogo (contatori che filtrano, prossimo
 // scatto, errori di oggi), filtro a segmenti e le regole in gruppi per stato.
+// 0.7.2 (tavola «Automazioni con ricerca ed etichette»): sotto il riepilogo la ricerca (in memoria, solo della
+// schermata), i chip delle etichette («Tutte · N», poi una per etichetta) e, con un'etichetta scelta, la card del
+// gruppo con «Pausa gruppo» / «Riprendi gruppo». Le righe arrivano già filtrate per stato ed etichetta.
 // Invarianti resi qui:
 //  - ORDINAMENTO FISSO: PENDING_APPROVAL → NEEDS_REVIEW → ARMED → DISABLED, indipendente dall'ordine in cui
 //    arrivano le righe (§7.2). Un gruppo di card per stato.
@@ -122,13 +141,49 @@ internal enum class ListEmptyKind {
 
     /** Un filtro è attivo e nessuna riga lo soddisfa: non è «tutto sparito», basta togliere il filtro. */
     NO_MATCH_FOR_FILTER,
+
+    /** 0.7.2: ci sono righe, ma nessuna contiene ciò che si cerca. */
+    NO_MATCH_FOR_SEARCH,
 }
 
-internal fun listEmptyKind(rowCount: Int, filter: StatusFilter): ListEmptyKind = when {
+/**
+ * [rowCount]: righe mostrate; [beforeSearch]: righe prima della ricerca (già filtrate per stato ed etichetta).
+ * Senza righe dopo la ricerca ma con righe prima, è la ricerca a non trovare nulla.
+ */
+internal fun listEmptyKind(
+    rowCount: Int,
+    filter: StatusFilter,
+    labelSelected: Boolean = false,
+    beforeSearch: Int = rowCount,
+): ListEmptyKind = when {
     rowCount > 0 -> ListEmptyKind.NONE
-    filter == StatusFilter.ALL -> ListEmptyKind.NO_RULES
-    else -> ListEmptyKind.NO_MATCH_FOR_FILTER
+    beforeSearch > 0 -> ListEmptyKind.NO_MATCH_FOR_SEARCH
+    filter != StatusFilter.ALL || labelSelected -> ListEmptyKind.NO_MATCH_FOR_FILTER
+    else -> ListEmptyKind.NO_RULES
 }
+
+/** 0.7.2: le parti del sottotitolo del gruppo scelto («3 attive · 1 da approvare»). */
+internal sealed interface GroupCountPart {
+    data class Active(val count: Int) : GroupCountPart
+    data class Waiting(val count: Int) : GroupCountPart
+    data object NoneActive : GroupCountPart
+}
+
+internal fun groupCountParts(active: Int, waiting: Int): List<GroupCountPart> = buildList {
+    if (active > 0) add(GroupCountPart.Active(active))
+    if (waiting > 0) add(GroupCountPart.Waiting(waiting))
+    if (isEmpty()) add(GroupCountPart.NoneActive)
+}
+
+/** 0.7.2: il chip dell'etichetta scelta, se c'è ancora (un'etichetta senza regole sparisce). */
+internal fun selectedLabelChip(state: AutomationListState): LabelChipUi? =
+    state.selectedLabel?.let { selected ->
+        state.labels.firstOrNull { RuleLabels.key(it.label) == RuleLabels.key(selected) }
+    }
+
+/** 0.7.2: la riga mostra «trigger → azioni», come la tavola. */
+internal fun rowSubtitle(row: AutomationRow): String =
+    row.actionSummary?.takeIf { it.isNotBlank() }?.let { "${row.triggerSummary} → $it" } ?: row.triggerSummary
 
 /**
  * Una riga sullo schermo: la regola, la sua posizione nel gruppo del suo stato (angoli della card) e lo
@@ -206,7 +261,14 @@ fun AutomationListScreen(
 ) {
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ArgusLargeTopBar(stringResource(R.string.list_title))
+            ArgusLargeTopBar(stringResource(R.string.list_title)) {
+                // 0.7.2: la galleria dei modelli parte da qui (tavola «Modelli»: si torna ad Automazioni).
+                ArgusButton(
+                    text = stringResource(R.string.tpl_open),
+                    onClick = callbacks::onOpenTemplates,
+                    style = ButtonStyle.Text,
+                )
+            }
 
             // Banner salute persistente e tappabile → Sistema (nav host-owned via onBannerTap).
             EngineBannerBar(
@@ -239,7 +301,14 @@ fun AutomationListScreen(
 
 @Composable
 private fun AutomationListBody(state: AutomationListState, callbacks: AutomationListCallbacks) {
-    val entries = listEntriesOf(state.rows)
+    // 0.7.2: la ricerca è solo della schermata (in memoria, sulle righe già filtrate per stato ed etichetta).
+    var query by rememberSaveable { mutableStateOf("") }
+    val shownRows = RuleSearch.filter(state.rows, query)
+    val entries = listEntriesOf(shownRows)
+    val selectedChip = selectedLabelChip(state)
+    val pausedLabelKeys = state.labels.filter { it.paused }.mapTo(HashSet()) { RuleLabels.key(it.label) }
+    // Senza regole non c'è niente da cercare né da etichettare: resta l'invito ad andare in chat.
+    val showFinder = state.totalCount > 0 || state.rows.isNotEmpty()
     val filterLabels = mapOf(
         StatusFilter.ALL to stringResource(R.string.list_filter_all),
         StatusFilter.PENDING to stringResource(R.string.list_filter_pending),
@@ -261,6 +330,38 @@ private fun AutomationListBody(state: AutomationListState, callbacks: Automation
                 )
             }
         }
+        // 0.7.2 (tavola «Automazioni con ricerca ed etichette»): ricerca, etichette e gruppo scelto.
+        if (showFinder) {
+            item(key = "search") {
+                ArgusSearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = stringResource(R.string.lbl_search_placeholder),
+                    clearDescription = stringResource(R.string.lbl_search_clear),
+                    modifier = Modifier.padding(
+                        start = ArgusSpacing.Large,
+                        end = ArgusSpacing.Large,
+                        top = if (state.summary != null) ArgusSpacing.Large else 0.dp,
+                    ),
+                )
+            }
+            item(key = "labels") {
+                LabelFilterRow(
+                    state = state,
+                    onSelect = callbacks::onSelectLabel,
+                    modifier = Modifier.padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = ArgusSpacing.Large),
+                )
+            }
+            selectedChip?.let { chip ->
+                item(key = "label_group") {
+                    SelectedLabelGroupCard(
+                        chip = chip,
+                        onSetPaused = { paused -> callbacks.onSetLabelPaused(chip.label, paused) },
+                        modifier = Modifier.padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = ArgusSpacing.Large),
+                    )
+                }
+            }
+        }
         item(key = "filter") {
             ArgusSegmentedFilter(
                 options = FilterOrder,
@@ -268,19 +369,40 @@ private fun AutomationListBody(state: AutomationListState, callbacks: Automation
                 onSelect = callbacks::onFilter,
                 label = { filterLabels.getValue(it) },
                 groupDescription = stringResource(R.string.rda_lc_filter_group),
-                modifier = Modifier.padding(top = if (state.summary != null) ArgusSpacing.Large else 0.dp, bottom = ArgusSpacing.Large),
+                modifier = Modifier.padding(
+                    top = if (state.summary != null || showFinder) ArgusSpacing.Large else 0.dp,
+                    bottom = ArgusSpacing.Large,
+                ),
             )
         }
         if (entries.isEmpty()) {
             item(key = "empty") {
-                when (listEmptyKind(entries.size, state.filter)) {
+                when (
+                    listEmptyKind(
+                        rowCount = entries.size,
+                        filter = state.filter,
+                        labelSelected = selectedChip != null,
+                        beforeSearch = state.rows.size,
+                    )
+                ) {
+                    // 0.7.2: la ricerca non trova nulla: lo dice e offre di cancellarla.
+                    ListEmptyKind.NO_MATCH_FOR_SEARCH -> EmptyState(
+                        icon = Icons.Rounded.SearchOff,
+                        title = stringResource(R.string.lbl_search_empty_title, query.trim()),
+                        body = stringResource(R.string.lbl_search_empty_body),
+                        ctaLabel = stringResource(R.string.lbl_search_clear),
+                        onCta = { query = "" },
+                    )
                     // Filtro attivo senza risultati (B49): messaggio distinto + azione per toglierlo.
                     ListEmptyKind.NO_MATCH_FOR_FILTER -> EmptyState(
                         icon = Icons.Rounded.FilterAltOff,
                         title = stringResource(R.string.ui40_list_filter_empty_title),
                         body = stringResource(R.string.ui40_list_filter_empty_body),
                         ctaLabel = stringResource(R.string.ui40_list_filter_clear),
-                        onCta = { callbacks.onFilter(StatusFilter.ALL) },
+                        onCta = {
+                            callbacks.onFilter(StatusFilter.ALL)
+                            callbacks.onSelectLabel(null)
+                        },
                     )
                     // Empty (§6.2): la CTA cambia tab → Chat; la navigazione è host-owned
                     // (NavHost, Task 12) via onEmptyCta, come le altre affordance di nav.
@@ -302,10 +424,87 @@ private fun AutomationListBody(state: AutomationListState, callbacks: Automation
                     onOpenPendingEdit = { draftId -> callbacks.onOpen(draftId) },
                     onToggleEnabled = { enabled -> callbacks.onToggleEnabled(entry.row.id, enabled) },
                     modifier = Modifier.padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = entry.topGap),
+                    pausedLabelKeys = pausedLabelKeys,
+                )
+            }
+            // 0.7.2: dove si scelgono le etichette e che cosa (non) cambiano.
+            item(key = "labels_note") {
+                Text(
+                    stringResource(R.string.lbl_list_note),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = ArgusSpacing.Large),
                 )
             }
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// Etichette (0.7.2)
+// -----------------------------------------------------------------------------
+
+/** «Tutte · N», poi un chip per etichetta con il suo conteggio. Scelta esclusiva: toccare quella scelta torna a «Tutte». */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LabelFilterRow(state: AutomationListState, onSelect: (String?) -> Unit, modifier: Modifier = Modifier) {
+    val selected = selectedLabelChip(state)
+    val groupDescription = stringResource(R.string.lbl_filter_group)
+    FlowRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = groupDescription }
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Small),
+        verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small),
+    ) {
+        LabelFilterChip(
+            text = stringResource(R.string.lbl_chip_all, state.totalCount),
+            selected = selected == null,
+            onClick = { onSelect(null) },
+            contentDescription = stringResource(R.string.lbl_chip_all_cd, state.totalCount),
+        )
+        state.labels.forEach { chip ->
+            val isSelected = selected?.label == chip.label
+            LabelFilterChip(
+                text = stringResource(R.string.lbl_chip_count, chip.label, chip.count),
+                selected = isSelected,
+                onClick = { onSelect(if (isSelected) null else chip.label) },
+                contentDescription = if (chip.paused) {
+                    stringResource(R.string.lbl_chip_paused_cd, chip.label, chip.count)
+                } else {
+                    stringResource(R.string.lbl_chip_cd, chip.label, chip.count)
+                },
+                paused = chip.paused,
+            )
+        }
+    }
+}
+
+/** Intestazione del gruppo scelto: quante regole sono attive o aspettano, e la pausa del gruppo. */
+@Composable
+private fun SelectedLabelGroupCard(chip: LabelChipUi, onSetPaused: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    val counts = groupCountParts(chip.activeCount, chip.waitingCount).map { part ->
+        when (part) {
+            is GroupCountPart.Active -> if (part.count == 1) {
+                stringResource(R.string.lbl_group_active_one)
+            } else {
+                stringResource(R.string.lbl_group_active_many, part.count)
+            }
+            is GroupCountPart.Waiting -> stringResource(R.string.lbl_group_waiting, part.count)
+            GroupCountPart.NoneActive -> stringResource(R.string.lbl_group_none_active)
+        }
+    }.joinToString(" · ")
+    LabelGroupCard(
+        title = stringResource(R.string.lbl_group_title, chip.label),
+        subtitle = if (chip.paused) stringResource(R.string.lbl_group_paused_summary, counts) else counts,
+        paused = chip.paused,
+        pauseLabel = stringResource(R.string.lbl_group_pause),
+        resumeLabel = stringResource(R.string.lbl_group_resume),
+        onTogglePause = { onSetPaused(!chip.paused) },
+        pausedDescription = if (chip.paused) stringResource(R.string.lbl_group_paused_state) else null,
+        modifier = modifier,
+    )
 }
 
 // -----------------------------------------------------------------------------
@@ -421,6 +620,8 @@ private fun AutomationRuleCard(
     onOpenPendingEdit: (String) -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /** 0.7.2: chiavi delle etichette in pausa, per segnare quale etichetta sospende la regola. */
+    pausedLabelKeys: Set<String> = emptySet(),
 ) {
     val row = entry.row
     val showToggle = row.status == StatusBadge.ARMED || row.status == StatusBadge.DISABLED
@@ -431,7 +632,7 @@ private fun AutomationRuleCard(
     ) {
         ArgusListRow(
             title = row.name,
-            subtitle = row.triggerSummary,
+            subtitle = rowSubtitle(row),
             leading = {
                 TriggerContainer(
                     icon = iconFor(row.triggerIconKey),
@@ -461,7 +662,21 @@ private fun AutomationRuleCard(
                         row.pendingEditDraftId?.let { draftId ->
                             PendingEditChip(onClick = { onOpenPendingEdit(draftId) })
                         }
+                        // 0.7.2: sospesa da un suo gruppo: non scatta, e lo dice con icona e testo.
+                        if (row.groupPaused) {
+                            val pausedDescription = stringResource(R.string.lbl_row_paused_cd)
+                            StatusChip(
+                                role = ArgusTheme.semantic.pending,
+                                icon = Icons.Rounded.PauseCircle,
+                                text = stringResource(R.string.lbl_row_paused),
+                                modifier = Modifier.semantics { contentDescription = pausedDescription },
+                            )
+                        }
                         if (row.isGenerative) GenerativeTag()
+                        val labelPaused = stringResource(R.string.lbl_label_paused_cd)
+                        row.labels.forEach { label ->
+                            LabelTag(label, paused = RuleLabels.key(label) in pausedLabelKeys, pausedDescription = labelPaused)
+                        }
                     }
                     FireTimes(row)
                 }
@@ -633,12 +848,74 @@ private fun previewState(
     summary: ListSummary? = previewSummary,
     loading: Boolean = false,
     paused: Boolean = false,
-) = AutomationListState(rows = rows, filter = filter, banner = banner, loading = loading, paused = paused, summary = summary)
+) = AutomationListState(
+    rows = rows, filter = filter, banner = banner, loading = loading, paused = paused, summary = summary, totalCount = rows.size,
+)
 
 @ListScreenPreviews
 @Composable
 private fun ListMixedPreview() {
     ArgusTheme { AutomationListScreen(previewState(banner = EngineBanner.SHIZUKU_DOWN), NoopListCallbacks) }
+}
+
+/** 0.7.2 (tavola «Automazioni con ricerca ed etichette»): etichetta «Casa» scelta, gruppo attivo. */
+@ListScreenPreviews
+@Composable
+private fun ListLabelSelectedPreview() {
+    val rows = listOf(
+        AutomationRow(
+            id = "h1", name = "Arrivo a casa", triggerIconKey = "connectivity", triggerSummary = "Wi-Fi «Casa» collegato",
+            status = StatusBadge.ARMED, enabled = true, isGenerative = false, hasWarnings = false,
+            lastFiredLabel = null, nextFireLabel = null, actionSummary = "Modalità Casa, Volume", labels = listOf("Casa"),
+        ),
+        AutomationRow(
+            id = "h2", name = "Buonanotte", triggerIconKey = "time", triggerSummary = "Ogni giorno alle 23:00",
+            status = StatusBadge.ARMED, enabled = true, isGenerative = false, hasWarnings = false,
+            lastFiredLabel = null, nextFireLabel = "stasera 23:00", actionSummary = "Non disturbare", labels = listOf("Casa"),
+        ),
+        AutomationRow(
+            id = "h4", name = "Esco di casa", triggerIconKey = "connectivity", triggerSummary = "Wi-Fi «Casa» scollegato",
+            status = StatusBadge.PENDING_APPROVAL, enabled = false, isGenerative = false, hasWarnings = false,
+            lastFiredLabel = null, nextFireLabel = null, actionSummary = "Modalità Fuori", labels = listOf("Casa", "Auto"),
+        ),
+    )
+    ArgusTheme {
+        AutomationListScreen(
+            AutomationListState(
+                rows = rows, filter = StatusFilter.ALL, banner = EngineBanner.NONE, loading = false,
+                labels = listOf(
+                    LabelChipUi("Casa", count = 3, activeCount = 2, waitingCount = 1, paused = false),
+                    LabelChipUi("Lavoro", count = 3, activeCount = 3, waitingCount = 0, paused = false),
+                    LabelChipUi("Auto", count = 2, activeCount = 1, waitingCount = 1, paused = false),
+                ),
+                totalCount = 9,
+                selectedLabel = "Casa",
+            ),
+            NoopListCallbacks,
+        )
+    }
+}
+
+/** 0.7.2: gruppo in pausa: «Riprendi gruppo» e le righe segnate «In pausa». */
+@ListScreenPreviews
+@Composable
+private fun ListLabelPausedPreview() {
+    val rows = listOf(
+        previewRows[0].copy(labels = listOf("Auto"), groupPaused = true),
+        previewRows[3].copy(labels = listOf("Auto")),
+    )
+    ArgusTheme {
+        AutomationListScreen(
+            AutomationListState(
+                rows = rows, filter = StatusFilter.ALL, banner = EngineBanner.NONE, loading = false,
+                labels = listOf(LabelChipUi("Auto", count = 2, activeCount = 1, waitingCount = 1, paused = true)),
+                totalCount = 7,
+                selectedLabel = "Auto",
+                summary = previewSummary,
+            ),
+            NoopListCallbacks,
+        )
+    }
 }
 
 @ListScreenPreviews

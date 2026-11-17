@@ -714,6 +714,8 @@ class AndroidCapabilityProbeTest {
                 "immediate",
                 // 0.4.1: avvio manuale, sempre armabile.
                 "manual",
+                // 0.8: cambio di modalità, evento interno ad Argus.
+                "user_mode_changed",
                 "notification",
                 "phone_state.sms",
                 "connectivity.wifi",
@@ -724,6 +726,8 @@ class AndroidCapabilityProbeTest {
                 "audio_output",
                 "mode_changed",
                 "media",
+                // 0.8: la prossima sveglia, sempre armabile (AlarmManager, nessun permesso).
+                "next_alarm",
             ),
             manifest.availableTriggers,
         )

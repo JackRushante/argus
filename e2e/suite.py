@@ -23,7 +23,17 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, List
 
-from pairwise import ALL_ACTION_TYPES, CONFIGS, CONDITIONS, TRIGGERS, _walk_actions
+from pairwise import (
+    ALL_ACTION_TYPES,
+    CONDITIONS,
+    CONFIGS,
+    NOT_YET_AVAILABLE_ACTIONS,
+    NOT_YET_AVAILABLE_CODE,
+    NOT_YET_AVAILABLE_TRIGGERS,
+    TRIGGERS,
+    rule_actions,
+    rule_triggers,
+)
 
 SUITE_DIR = Path(__file__).resolve().parent / "suite"
 
@@ -105,10 +115,26 @@ def validate(records: Iterable[dict]) -> List[str]:
         if "name" not in rule or "trigger" not in rule or "actions" not in rule:
             problems.append(f"{rid}: la regola deve avere name, trigger e actions")
             continue
-        if rule["trigger"].get("type") not in TRIGGERS:
-            problems.append(f"{rid}: trigger sconosciuto {rule['trigger'].get('type')!r}")
-        for action in _walk_actions(rule.get("actions", [])):
-            if action.get("type") not in ALL_ACTION_TYPES:
+        # Un tipo spento (0.8) e' ammesso solo in una regola che si aspetta il rifiuto `not_available_yet`.
+        load = record.get("expect", {}).get("load", "ok")
+        fail = load.get("fail") if isinstance(load, dict) else None
+        expects_not_available = isinstance(fail, dict) and fail.get("code") == NOT_YET_AVAILABLE_CODE
+        exit_spec = rule.get("exit")
+        if exit_spec is not None and (not isinstance(exit_spec, dict) or "trigger" not in exit_spec):
+            problems.append(f"{rid}: exit deve avere un trigger")
+            continue
+        # 0.8: il trigger e le azioni di fine di una regola-intervallo seguono le stesse regole dell'inizio.
+        for trigger_type in rule_triggers(rule):
+            if trigger_type in NOT_YET_AVAILABLE_TRIGGERS:
+                if not expects_not_available:
+                    problems.append(f"{rid}: trigger spento {trigger_type!r}: ammesso solo per provare {NOT_YET_AVAILABLE_CODE}")
+            elif trigger_type not in TRIGGERS:
+                problems.append(f"{rid}: trigger sconosciuto {trigger_type!r}")
+        for action in rule_actions(rule):
+            if action.get("type") in NOT_YET_AVAILABLE_ACTIONS:
+                if not expects_not_available:
+                    problems.append(f"{rid}: azione spenta {action.get('type')!r}: ammessa solo per provare {NOT_YET_AVAILABLE_CODE}")
+            elif action.get("type") not in ALL_ACTION_TYPES:
                 problems.append(f"{rid}: tipo di azione non coperto dal modello: {action.get('type')!r}")
         unknown = set(record.get("per_config", {})) - set(CONFIGS)
         if unknown:

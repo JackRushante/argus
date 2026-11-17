@@ -6,6 +6,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTrigger
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -27,9 +28,11 @@ data class GeofenceRegistration(
 
     companion object {
         fun from(automation: Automation): GeofenceRegistration {
-            val trigger = automation.trigger as? Trigger.Geofence
+            // 0.8: l'area della regola, d'inizio o di fine (una regola-intervallo ne ha al più una: validator).
+            val trigger = automation.listenedTrigger<Trigger.Geofence>()
                 ?: throw IllegalArgumentException("trigger_not_geofence")
-            require(trigger.transition in setOf(Transition.ENTER, Transition.EXIT)) {
+            // 0.8: un DWELL si registra come un'area normale; l'attesa la gestisce l'ingress.
+            require(trigger.transition in setOf(Transition.ENTER, Transition.EXIT, Transition.DWELL)) {
                 "transition_unsupported"
             }
             require(!trigger.resolveCurrentLocation) { "coordinates_unresolved" }
@@ -232,6 +235,25 @@ object NoopGeofenceTriggerRuntime : GeofenceTriggerRuntime {
     override suspend fun reconcile(recreateOsRegistrations: Boolean) = GeofenceReconcileReport()
 }
 
+/**
+ * Dice se le fence registrate presso il sistema possono essere sparite mentre il processo non
+ * c'era (B8). Un semplice riavvio del PROCESSO non le tocca: il sistema continua a consegnare i
+ * bordi e risveglia l'app. Le perdono invece un riavvio del telefono e un arresto forzato.
+ */
+interface GeofenceContinuity {
+    /** `true` se dall'ultima registrazione riuscita i bordi possono essere andati persi. */
+    fun registrationsMayHaveLapsed(): Boolean
+
+    /** Le registrazioni sono state ricreate e lo stato riallineato: da qui nulla è perso. */
+    fun markRegistered()
+}
+
+/** Senza segnale affidabile si assume il caso peggiore (comportamento fino alla 0.7.1). */
+object AssumeLapsedGeofenceContinuity : GeofenceContinuity {
+    override fun registrationsMayHaveLapsed(): Boolean = true
+    override fun markRegistered() = Unit
+}
+
 /** Single-writer che mantiene Room, stato locale e LocationManager coerenti. */
 class GeofenceCoordinator(
     private val store: AutomationStore,
@@ -239,6 +261,7 @@ class GeofenceCoordinator(
     private val backend: GeofenceBackend,
     private val currentLocation: CurrentLocationProvider? = null,
     private val ingress: GeofenceEventIngress? = null,
+    private val continuity: GeofenceContinuity = AssumeLapsedGeofenceContinuity,
 ) : GeofenceTriggerRuntime {
     private val mutex = Mutex()
 
@@ -248,7 +271,7 @@ class GeofenceCoordinator(
         recreateOsRegistrations: Boolean,
     ): GeofenceReconcileReport = mutex.withLock {
         val desired = store.armed()
-            .filter { it.trigger is Trigger.Geofence }
+            .filter { it.listenedTrigger<Trigger.Geofence>() != null }
             .associateBy { it.id }
         val registered = mutableListOf<AutomationId>()
         val unregistered = mutableListOf<AutomationId>()
@@ -304,12 +327,23 @@ class GeofenceCoordinator(
 
         if (recreateOsRegistrations && ingress != null) {
             recovered += ingress.recoverPending(desired.keys)
+            // 0.8: i DWELL in attesa sopravvivono al riavvio: quelli dovuti si ricontrollano ora.
+            recovered += ingress.recoverDwells(desired.keys)
         }
+        ingress?.pruneDwells(desired.keys)
         val recoveryCandidates = desired.values.filter { automation ->
             automation.id !in failed && state.get(automation.id)?.lastTransition != null
         }
         val markedUnknown = mutableListOf<AutomationId>()
-        if (recreateOsRegistrations && recoveryCandidates.isNotEmpty() && currentLocation != null) {
+        // Recupero e «dimentica l'ultimo stato» servono solo se le fence del sistema possono essere
+        // sparite (riavvio, arresto forzato). Dopo un semplice riavvio del processo i bordi sono
+        // stati consegnati: dimenticare lo stato farebbe riscattare «arrivato a casa» senza
+        // movimento al primo ENTER della ri-registrazione (B8).
+        val lapsed = recreateOsRegistrations && runCatching {
+            continuity.registrationsMayHaveLapsed()
+        }.getOrDefault(true)
+        var continuityRestored = recreateOsRegistrations && failed.isEmpty()
+        if (lapsed && recoveryCandidates.isNotEmpty() && currentLocation != null) {
             val location = try {
                 currentLocation.current()
             } catch (error: CancellationException) {
@@ -332,11 +366,12 @@ class GeofenceCoordinator(
                         throw error
                     } catch (_: Exception) {
                         // Stato non aggiornato: resta com'e', il prossimo riavvio ritenta.
+                        continuityRestored = false
                     }
                 }
             } else if (ingress != null) {
                 recoveryCandidates.sortedBy { it.id.value }.forEach { automation ->
-                    val trigger = automation.trigger as Trigger.Geofence
+                    val trigger = automation.listenedTrigger<Trigger.Geofence>() ?: return@forEach
                     val persisted = state.get(automation.id) ?: return@forEach
                     val distance = distanceMeters(
                         trigger.lat,
@@ -366,6 +401,15 @@ class GeofenceCoordinator(
                         )
                     ) recovered += automation.id
                 }
+            }
+        }
+        if (lapsed && continuityRestored) {
+            try {
+                continuity.markRegistered()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Resta «forse perse»: il prossimo avvio ripete il caso peggiore, mai il contrario.
             }
         }
 

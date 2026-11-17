@@ -1,6 +1,7 @@
 package dev.argus.automation.di
 
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import dagger.Module
 import dagger.Provides
@@ -15,6 +16,7 @@ import dev.argus.automation.AndroidArmedAutomationRegistrar
 import dev.argus.automation.AndroidGenerativeRuntimeReadiness
 import dev.argus.automation.AndroidStateQueryProbe
 import dev.argus.automation.GenerativeRuntimeReadiness
+import dev.argus.automation.AndroidNextAlarmClock
 import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
@@ -27,11 +29,25 @@ import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.power.WaitWakeSignals
 import dev.argus.automation.power.WakeAlarmBackend
 import dev.argus.automation.power.WakeAwarePause
+import dev.argus.automation.prompt.AndroidUserPromptSurface
+import dev.argus.automation.prompt.EngineConfirmedRuns
+import dev.argus.automation.prompt.PendingPromptStore
+import dev.argus.automation.prompt.PrefsPromptBlobs
+import dev.argus.automation.prompt.UserPromptCoordinator
+import dev.argus.automation.prompt.UserPromptStartup
 import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
+import dev.argus.automation.directboot.AndroidLockedAlarms
+import dev.argus.automation.directboot.BeforeUnlockAwareTimeAlarmRuntime
+import dev.argus.automation.directboot.BeforeUnlockCopyWriter
+import dev.argus.automation.directboot.BeforeUnlockHandover
+import dev.argus.automation.directboot.BeforeUnlockOptInStore
+import dev.argus.automation.directboot.DirectBootStorage
+import dev.argus.automation.directboot.LockedBoot
+import dev.argus.automation.directboot.PrefsBeforeUnlockOptInStore
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.DeferredReplyCipher
 import dev.argus.automation.DeferredReplyManager
@@ -104,6 +120,11 @@ import dev.argus.automation.manual.ManualTileSelection
 import dev.argus.automation.manual.ManualTokenStore
 import dev.argus.automation.manual.ManualWorkLauncher
 import dev.argus.automation.manual.PrefsAutomationPauseStore
+import dev.argus.automation.labels.LabelAwarePause
+import dev.argus.automation.labels.LabelPauseStore
+import dev.argus.automation.labels.PrefsLabelPauseStore
+import dev.argus.automation.labels.RoomRuleLabelDirectory
+import dev.argus.automation.labels.RuleLabelDirectory
 import dev.argus.automation.manual.PrefsManualTileSelection
 import dev.argus.automation.manual.PrefsManualTokenStore
 import dev.argus.automation.manual.QuickTileController
@@ -116,6 +137,8 @@ import dev.argus.automation.triggers.EngineDeviceEventDispatcher
 import dev.argus.automation.triggers.PrefsBatteryLevelStore
 import dev.argus.engine.device.DeviceEventParser
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
+import dev.argus.automation.sensor.AndroidGestureSensorBackend
+import dev.argus.automation.sensor.CompositeSensorTriggerBackend
 import dev.argus.automation.sensor.EligibleSensorRule
 import dev.argus.automation.sensor.PrefsSensorDetectionStore
 import dev.argus.automation.sensor.SensorDetectionStore
@@ -124,11 +147,15 @@ import dev.argus.automation.sensor.SensorEventIngress
 import dev.argus.automation.sensor.SensorTriggerBackend
 import dev.argus.automation.sensor.SensorTriggerCoordinator
 import dev.argus.automation.sensor.SensorTriggerRuntime
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTrigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.StateQueryProbe
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmCoordinator
+import dev.argus.automation.SpanExitTimeAlarms
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmStateStore
 import dev.argus.automation.TimeEventDispatcher
@@ -136,6 +163,9 @@ import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
 import dev.argus.automation.notification.NotificationIngress
+import dev.argus.automation.notification.NotificationListenerWatchdog
+import dev.argus.automation.health.CapabilityHealthMonitor
+import dev.argus.automation.health.HealthReportingExecutionJournal
 import dev.argus.automation.notification.NotificationTriggerDemand
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyHandleFactory
@@ -159,9 +189,20 @@ import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.automation.backup.AndroidAutoBackupAlarm
+import dev.argus.automation.backup.AndroidAutoBackupFailureNotice
+import dev.argus.automation.backup.AndroidAutoBackupKeys
+import dev.argus.automation.backup.AutoBackupCoordinator
+import dev.argus.automation.backup.SharedPreferencesAutoBackupStateStore
+import dev.argus.data.RoomRuleLabelStore
+import dev.argus.data.backup.AutoBackupRunner
 import dev.argus.data.backup.ContentResolverDocumentIo
+import dev.argus.data.backup.DocumentTreeBackupFolder
 import dev.argus.data.backup.RulesBackup
 import dev.argus.data.backup.RulesBackupService
+import dev.argus.data.backup.RuleSharing
+import dev.argus.data.backup.AndroidTemplateAssets
+import dev.argus.data.backup.RuleTemplateCatalog
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
@@ -185,6 +226,14 @@ import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.phone.PrefsCallStateStore
+import dev.argus.automation.calendar.AndroidCalendarAlarmScheduler
+import dev.argus.automation.calendar.AndroidCalendarInstanceSource
+import dev.argus.automation.calendar.CalendarInstanceSource
+import dev.argus.automation.calendar.CalendarTriggerCoordinator
+import dev.argus.automation.calendar.CalendarTriggerLifecycle
+import dev.argus.automation.calendar.CalendarTriggerRuntime
+import dev.argus.automation.calendar.PrefsCalendarFiredStore
+import dev.argus.automation.context.AndroidDeviceFactsReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityEventIngress
 import dev.argus.automation.connectivity.AndroidConnectivitySentinelBackend
@@ -194,6 +243,14 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
 import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.nfc.AndroidNfcTagReader
+import dev.argus.automation.nfc.NfcScanIngress
+import dev.argus.automation.nfc.NfcScanVerification
+import dev.argus.automation.geofence.AndroidGeofenceDwellTimer
+import dev.argus.automation.geofence.GeofenceDwellSupport
+import dev.argus.automation.geofence.PrefsGeofenceDwellStore
+import dev.argus.engine.model.Transition
+import dev.argus.automation.geofence.AndroidGeofenceContinuity
 import dev.argus.automation.geofence.GeofenceBackend
 import dev.argus.automation.geofence.GeofenceCoordinator
 import dev.argus.automation.geofence.GeofenceEventDispatcher
@@ -217,6 +274,7 @@ import dev.argus.engine.runtime.FirePolicy
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.RevalidatingFirePolicy
 import dev.argus.engine.runtime.SubmittedActionJournal
+import dev.argus.engine.runtime.SpanPhase
 import dev.argus.engine.runtime.TriggerMatcher
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.ApprovalWhitelistProvider
@@ -298,17 +356,62 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun rulesBackup(
+    fun rulesBackupService(
         @ApplicationContext context: Context,
         store: AutomationStore,
         repository: RoomDraftRepository,
         installInfo: AppInstallInfo,
-    ): RulesBackup = RulesBackupService(
+        labelStore: RoomRuleLabelStore,
+        backupState: dev.argus.data.RoomBackupState,
+    ): RulesBackupService = RulesBackupService(
         automations = store,
         drafts = repository,
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
+        labels = { labelStore.snapshot() },
+        // 0.8: modalità e valori conservati nel backup completo.
+        state = backupState,
     )
+
+    /** 0.7.2: modelli di regola negli asset dell'app (galleria «Modelli»). */
+    @Provides
+    @Singleton
+    fun ruleTemplateCatalog(@ApplicationContext context: Context): RuleTemplateCatalog =
+        RuleTemplateCatalog(AndroidTemplateAssets(context.assets))
+
+    /** 0.7.2: «Condividi» del Dettaglio: lo stesso file di backup con una sola regola. */
+    @Provides
+    @Singleton
+    fun ruleSharing(
+        @ApplicationContext context: Context,
+        installInfo: AppInstallInfo,
+    ): RuleSharing = RuleSharing(
+        documents = ContentResolverDocumentIo(context),
+        appVersion = { installInfo.versionName },
+    )
+
+    @Provides
+    fun rulesBackup(service: RulesBackupService): RulesBackup = service
+
+    /** 0.7.2: backup automatico cifrato in una cartella scelta dall'utente (export completo). */
+    @Provides
+    @Singleton
+    fun autoBackupCoordinator(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+        service: RulesBackupService,
+    ): AutoBackupCoordinator {
+        val folder = DocumentTreeBackupFolder(context)
+        return AutoBackupCoordinator(
+            scope = scope,
+            store = SharedPreferencesAutoBackupStateStore(context),
+            keys = AndroidAutoBackupKeys(context),
+            folder = folder,
+            runner = AutoBackupRunner(build = service::buildFullBackup, folder = folder),
+            alarm = AndroidAutoBackupAlarm(context),
+            notice = AndroidAutoBackupFailureNotice(context),
+        )
+    }
 
     @Provides
     @Singleton
@@ -322,11 +425,12 @@ object ArgusModule {
     fun executionJournal(database: ArgusDatabase): RoomExecutionJournal =
         RoomExecutionJournal(database.executionJournalDao())
 
+    // 0.7.2: il journal passa dagli avvisi di salute (HealthModule), le scritture restano quelle di Room.
     @Provides
-    fun executionJournalBoundary(journal: RoomExecutionJournal): ExecutionJournal = journal
+    fun executionJournalBoundary(journal: HealthReportingExecutionJournal): ExecutionJournal = journal
 
     @Provides
-    fun submittedActionJournalBoundary(journal: RoomExecutionJournal): SubmittedActionJournal = journal
+    fun submittedActionJournalBoundary(journal: HealthReportingExecutionJournal): SubmittedActionJournal = journal
 
     @Provides
     @Singleton
@@ -517,6 +621,9 @@ object ArgusModule {
         location: CurrentLocationProvider,
         root: RootAccess,
         usageForeground: ForegroundAppSource,
+        @ApplicationContext context: Context,
+        calendarSource: CalendarInstanceSource,
+        persistentState: dev.argus.automation.PersistentStateReader,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
         gateway,
@@ -528,7 +635,46 @@ object ArgusModule {
             gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
         },
         usageForeground = usageForeground,
+        // 0.8: condizioni di contesto (Wi-Fi, Bluetooth, cuffie, calendario) con le API pubbliche.
+        factsReader = AndroidDeviceFactsReader(context, calendarSource),
+        // 0.8: valori conservati e modalità.
+        persistentState = persistentState,
     )
+
+    /** 0.8: istanze del calendario del telefono (`READ_CALENDAR`), per calendar_busy e calendar_event. */
+    @Provides
+    @Singleton
+    fun calendarInstanceSource(@ApplicationContext context: Context): CalendarInstanceSource =
+        AndroidCalendarInstanceSource(context)
+
+    @Provides
+    @Singleton
+    fun calendarTriggerCoordinator(
+        @ApplicationContext context: Context,
+        store: AutomationStore,
+        source: CalendarInstanceSource,
+        engine: Engine,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+    ): CalendarTriggerCoordinator = CalendarTriggerCoordinator(
+        store = store,
+        source = source,
+        firedStore = PrefsCalendarFiredStore(context),
+        alarms = AndroidCalendarAlarmScheduler(context),
+        dispatch = { envelope -> frame.run { engine.onTrigger(envelope) { request -> state.current(request) } } },
+    )
+
+    @Provides
+    fun calendarTriggerRuntime(coordinator: CalendarTriggerCoordinator): CalendarTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
+    fun calendarTriggerLifecycle(
+        @ApplicationContext context: Context,
+        coordinator: CalendarTriggerCoordinator,
+        store: AutomationStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): CalendarTriggerLifecycle = CalendarTriggerLifecycle(context, coordinator, store, scope)
 
     @Provides
     fun deviceStateSnapshotProvider(
@@ -563,7 +709,14 @@ object ArgusModule {
     )
 
     @Provides
-    fun capabilityProbeBoundary(probe: AndroidCapabilityProbe): CapabilityProbe = probe
+    fun capabilityProbeBoundary(
+        probe: AndroidCapabilityProbe,
+        secrets: dev.argus.engine.secrets.SecretVault,
+        userModes: dev.argus.automation.UserModeNames,
+    ): CapabilityProbe = dev.argus.automation.modes.UserModeNamesCapabilityProbe(
+        dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets),
+        userModes,
+    )
 
     @Provides
     fun firePolicySnapshotProvider(probe: AndroidCapabilityProbe): FirePolicySnapshotProvider = probe
@@ -795,7 +948,9 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
+    fun httpRequestExecutor(secrets: dev.argus.engine.secrets.SecretVault): HttpRequestExecutor =
+        // 0.8: i valori della cassaforte si leggono solo qui, allo scatto.
+        HttpRequestExecutor(secrets = secrets)
 
     // --- 0.5.1: azioni privilegiate tipizzate (controllo app, aereo, posizione, NFC, ...) ---
 
@@ -856,6 +1011,9 @@ object ArgusModule {
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
         uiSteps: UiStepsRunner,
+        telephony: dev.argus.automation.telephony.TelephonyActionRunner,
+        screenDecisions: dev.argus.automation.telephony.ScreenCallDecisionLog,
+        storedModes: dev.argus.engine.runtime.StoredModeActions,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -885,6 +1043,15 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: SMS, chiamate e Intent; la foglia screen_call legge la decisione del filtro chiamate.
+            telephony = telephony,
+            screenDecisions = screenDecisions,
+            // 0.8: chiudi, posticipa o premi un pulsante della notifica, via il listener collegato.
+            notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
+                dev.argus.automation.notification.ConnectedNotificationListener,
+            ),
+            // 0.8: set_stored e set_user_mode.
+            storedModes = storedModes,
         )
 
     @Provides
@@ -941,7 +1108,11 @@ object ArgusModule {
         journal: ExecutionJournal,
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
-        automationPause: AutomationPauseStore,
+        automationPause: LabelAwarePause,
+        prompts: UserPromptCoordinator,
+        callerScope: dev.argus.automation.telephony.CallerScopeLog,
+        spans: dev.argus.automation.span.PrefsSpanStore,
+        spanDevice: dev.argus.automation.span.AndroidSpanDevice,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -953,8 +1124,73 @@ object ArgusModule {
         resolvedExecutor = resolvedExecutor,
         pause = { millis -> wakeAwarePause.pause(millis) },
         // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
+        // 0.7.2: decisa per regola, con la pausa dei gruppi (etichette).
         firingPause = automationPause,
+        // 0.8: «chiedimi prima di eseguire» e le domande con pulsanti.
+        confirmations = prompts,
+        questions = prompts,
+        // 0.8: `screen_call` «solo chi non è nei contatti» vale per tutta la regola (perimetro dal filtro chiamate).
+        callerScope = callerScope,
+        // 0.8: regole-intervallo («finché…, poi rimetti com'era»): stato persistito e lettura dei valori di prima.
+        spans = spans,
+        spanDevice = spanDevice,
         now = System::currentTimeMillis,
+    )
+
+    /** 0.8: regole-intervallo in corso, in preferenze (nessuna tabella nuova). */
+    @Provides
+    @Singleton
+    fun spanStore(@ApplicationContext context: Context): dev.argus.automation.span.PrefsSpanStore =
+        dev.argus.automation.span.PrefsSpanStore(context)
+
+    @Provides
+    fun spanStoreBoundary(store: dev.argus.automation.span.PrefsSpanStore): dev.argus.engine.runtime.SpanStore = store
+
+    /** 0.8: la modalità si rimette col commutatore unico; Lazy rompe il giro motore → modalità → motore. */
+    @Provides
+    @Singleton
+    fun spanDevice(
+        @ApplicationContext context: Context,
+        state: DeviceStateSnapshotProvider,
+        modes: dagger.Lazy<dev.argus.engine.runtime.UserModeSwitcher>,
+    ): dev.argus.automation.span.AndroidSpanDevice =
+        dev.argus.automation.span.AndroidSpanDevice(context, state) { modes.get() }
+
+    /** 0.8: domande in attesa (confirm, ask), cifrate con la chiave delle risposte differite. */
+    @Provides
+    @Singleton
+    fun pendingPromptStore(
+        @ApplicationContext context: Context,
+        cipher: DeferredReplyCipher,
+    ): PendingPromptStore = PendingPromptStore(PrefsPromptBlobs(context), cipher)
+
+    @Provides
+    @Singleton
+    fun userPromptCoordinator(
+        @ApplicationContext context: Context,
+        store: PendingPromptStore,
+        engine: Provider<Engine>,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+        wakeAwarePause: WakeAwarePause,
+    ): UserPromptCoordinator = UserPromptCoordinator(
+        store = store,
+        surface = AndroidUserPromptSurface(context),
+        // Il motore dipende dal coordinatore: lo si risolve al primo Esegui.
+        runs = EngineConfirmedRuns(engine, state, frame),
+        pause = { millis -> wakeAwarePause.pause(millis) },
+    )
+
+    @Provides
+    @Singleton
+    fun userPromptStartup(
+        @ApplicationScope scope: CoroutineScope,
+        coordinator: UserPromptCoordinator,
+        preferences: AppPreferencesStore,
+    ): UserPromptStartup = UserPromptStartup(
+        scope,
+        coordinator,
+        preferences.observe().map { it.privacyAccepted },
     )
 
     @Provides
@@ -1064,6 +1300,17 @@ object ArgusModule {
         dispatcher = dispatcher,
     )
 
+    /** 0.8: scansioni dei tag NFC dall'activity trampolino, verso il motore. */
+    @Provides
+    @Singleton
+    fun nfcScanIngress(dispatcher: DeviceEventDispatcher): NfcScanIngress =
+        NfcScanIngress(DeviceEventParser(), dispatcher)
+
+    /** 0.8: lettura del tag all'attivazione di una regola `nfc_tag`, in primo piano. */
+    @Provides
+    @Singleton
+    fun nfcTagReader(@ApplicationContext context: Context): AndroidNfcTagReader = AndroidNfcTagReader(context)
+
     @Provides
     @Singleton
     fun connectivityEventDispatcher(
@@ -1109,7 +1356,8 @@ object ArgusModule {
     @Singleton
     fun sharedForegroundSentinel(
         backend: ConnectivitySentinelBackend,
-    ): SharedForegroundSentinel = SharedForegroundSentinel(backend)
+        status: ConnectivitySentinelStatus,
+    ): SharedForegroundSentinel = SharedForegroundSentinel(backend, serviceActive = { status.active.value })
 
     @Provides
     @Singleton
@@ -1117,7 +1365,8 @@ object ArgusModule {
         @ApplicationScope scope: CoroutineScope,
         sentinel: SharedForegroundSentinel,
         audit: AuditSink,
-    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit)
+        wakeLock: ExecutionWakeLock,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit, wakeLock = wakeLock)
 
     @Provides
     @Singleton
@@ -1166,8 +1415,28 @@ object ArgusModule {
     ): AndroidSignificantMotionBackend =
         AndroidSignificantMotionBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
 
+    /** 0.8: doppia scossa e faccia in giù, dall'accelerometro e solo a schermo acceso. */
     @Provides
-    fun sensorTriggerBackendBoundary(backend: AndroidSignificantMotionBackend): SensorTriggerBackend = backend
+    @Singleton
+    fun gestureSensorBackend(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+        ingress: Provider<SensorEventIngress>,
+    ): AndroidGestureSensorBackend =
+        AndroidGestureSensorBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
+
+    @Provides
+    @Singleton
+    fun sensorTriggerBackendBoundary(
+        backend: AndroidSignificantMotionBackend,
+        gestures: AndroidGestureSensorBackend,
+    ): SensorTriggerBackend = CompositeSensorTriggerBackend(
+        mapOf(
+            SensorKind.SIGNIFICANT_MOTION to backend,
+            SensorKind.SHAKE to gestures,
+            SensorKind.FLIP_FACE_DOWN to gestures,
+        ),
+    )
 
     @Provides
     @Singleton
@@ -1211,8 +1480,9 @@ object ArgusModule {
         rearmer = coordinator,
         eligibleRules = { kind ->
             store.armed().mapNotNull { automation ->
-                val trigger = automation.trigger as? Trigger.Sensor ?: return@mapNotNull null
-                if (trigger.kind != kind) return@mapNotNull null
+                // 0.8: il sensore d'inizio o quello di fine (sono di tipi diversi: validator).
+                val trigger = automation.listenedTriggers.filterIsInstance<Trigger.Sensor>()
+                    .firstOrNull { it.kind == kind } ?: return@mapNotNull null
                 val fingerprint = automation.approvalFingerprint ?: return@mapNotNull null
                 EligibleSensorRule(automation.id, fingerprint, trigger.kind)
             }
@@ -1255,21 +1525,41 @@ object ArgusModule {
         dispatcher: GeofenceEventDispatcher,
         store: AutomationStore,
         location: CurrentLocationProvider,
+        @ApplicationContext context: Context,
     ): GeofenceEventIngress = GeofenceEventIngress(
         state,
         dispatcher,
-        LocationBackedTransitionVerifier({ store.get(it)?.trigger }, location),
+        // 0.8: l'area della regola, d'inizio o di fine.
+        LocationBackedTransitionVerifier({ store.get(it)?.listenedTrigger<Trigger.Geofence>() }, location),
+        // 0.8: DWELL, ricontrollo persistito con la sua sveglia.
+        GeofenceDwellSupport(
+            delayOf = { id ->
+                (store.get(id)?.trigger as? Trigger.Geofence)
+                    ?.takeIf { it.transition == Transition.DWELL }
+                    ?.loiteringDelayMs
+            },
+            store = PrefsGeofenceDwellStore(context),
+            timer = AndroidGeofenceDwellTimer(context),
+        ),
     )
 
     @Provides
     @Singleton
     fun geofenceCoordinator(
+        @ApplicationContext context: Context,
         store: AutomationStore,
         state: GeofenceStateStore,
         backend: GeofenceBackend,
         location: CurrentLocationProvider,
         ingress: GeofenceEventIngress,
-    ): GeofenceCoordinator = GeofenceCoordinator(store, state, backend, location, ingress)
+    ): GeofenceCoordinator = GeofenceCoordinator(
+        store,
+        state,
+        backend,
+        location,
+        ingress,
+        continuity = AndroidGeofenceContinuity(context),
+    )
 
     @Provides
     fun geofenceTriggerRuntime(coordinator: GeofenceCoordinator): GeofenceTriggerRuntime =
@@ -1301,6 +1591,7 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         launcher: ReceiverWorkLauncher,
+        @ApplicationContext context: Context,
     ): TimeAlarmCoordinator =
         TimeAlarmCoordinator(
             store,
@@ -1313,12 +1604,90 @@ object ArgusModule {
             // I recuperi dovuti partono in background e tengono la lease del servizio in primo
             // piano per tutta la loro durata: il reconcile non aspetta un programma lungo (B3).
             recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
+            // 0.8: le regole next_alarm leggono la prossima sveglia a ogni pianificazione.
+            nextAlarmAt = AndroidNextAlarmClock(context)::nextAlarmAt,
         )
+
+    /**
+     * 0.8: le sveglie di FINE delle regole-intervallo, con un coordinatore, uno stato (preferenze) e un backend
+     * propri: una regola può avere la sveglia d'inizio e quella di fine insieme.
+     */
+    @Provides
+    @Singleton
+    fun spanExitTimeAlarms(
+        store: AutomationStore,
+        dispatcher: TimeEventDispatcher,
+        audit: AuditSink,
+        oneShotConsumptions: OneShotConsumptionRegistry,
+        launcher: ReceiverWorkLauncher,
+        @ApplicationContext context: Context,
+    ): SpanExitTimeAlarms = SpanExitTimeAlarms(
+        TimeAlarmCoordinator(
+            store,
+            dev.argus.automation.PrefsTimeAlarmStateStore(context),
+            AndroidTimeAlarmBackend(context, SpanPhase.EXIT),
+            dispatcher,
+            Instant::now,
+            audit,
+            oneShotConsumptions,
+            recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
+            nextAlarmAt = AndroidNextAlarmClock(context)::nextAlarmAt,
+            phase = SpanPhase.EXIT,
+        ),
+    )
+
+    /**
+     * 0.8: every use of the time alarms waits until what the rules did before the first unlock is in the Log, so a
+     * due alarm from before the restart is not run again for an occurrence the locked path already handled.
+     */
+    @Provides
+    @Singleton
+    fun timeAlarmRuntime(
+        coordinator: TimeAlarmCoordinator,
+        exit: SpanExitTimeAlarms,
+        handover: BeforeUnlockHandover,
+    ): TimeAlarmRuntime =
+        BeforeUnlockAwareTimeAlarmRuntime(CoordinatorTimeAlarmRuntime(coordinator, exit.coordinator), handover)
+
+    // --- 0.8: rules active before the first unlock -------------------------------------------------------
 
     @Provides
     @Singleton
-    fun timeAlarmRuntime(coordinator: TimeAlarmCoordinator): TimeAlarmRuntime =
-        CoordinatorTimeAlarmRuntime(coordinator)
+    fun directBootStorage(@ApplicationContext context: Context): DirectBootStorage = DirectBootStorage(context)
+
+    @Provides
+    @Singleton
+    fun beforeUnlockOptIns(@ApplicationContext context: Context): BeforeUnlockOptInStore =
+        PrefsBeforeUnlockOptInStore(context)
+
+    @Provides
+    @Singleton
+    fun beforeUnlockHandover(
+        storage: DirectBootStorage,
+        store: AutomationStore,
+        journal: ExecutionJournal,
+        audit: AuditSink,
+        state: TimeAlarmStateStore,
+        @ApplicationContext context: Context,
+    ): BeforeUnlockHandover = BeforeUnlockHandover(
+        storage = storage,
+        store = store,
+        journal = journal,
+        audit = audit,
+        timeAlarms = state,
+        alarms = AndroidLockedAlarms(context),
+        bootCount = { LockedBoot.bootCount(context) },
+    )
+
+    @Provides
+    @Singleton
+    fun beforeUnlockCopyWriter(
+        store: AutomationStore,
+        optIns: BeforeUnlockOptInStore,
+        storage: DirectBootStorage,
+        audit: AuditSink,
+        @ApplicationScope scope: CoroutineScope,
+    ): BeforeUnlockCopyWriter = BeforeUnlockCopyWriter(store, optIns, storage, audit, System::currentTimeMillis, scope)
 
     @Provides
     @Singleton
@@ -1333,6 +1702,9 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         foregroundLauncher: ReceiverWorkLauncher,
+        calendar: CalendarTriggerRuntime,
+        exitTimeAlarms: SpanExitTimeAlarms,
+        handover: BeforeUnlockHandover,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1345,6 +1717,9 @@ object ArgusModule {
         audit,
         oneShotConsumptions,
         foregroundLauncher,
+        calendar,
+        exitTimeAlarms = exitTimeAlarms.coordinator,
+        beforeTimeReconcile = handover::ensureImported,
     )
 
     /**
@@ -1391,6 +1766,9 @@ object ArgusModule {
         stateQueries: StateQueryProbe,
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
+        nfcTags: AndroidNfcTagReader,
+        userModes: dev.argus.data.RoomUserModeStore,
+        secrets: dev.argus.engine.secrets.SecretVault,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -1401,6 +1779,12 @@ object ArgusModule {
         stateQueries,
         audit,
         installedPackages = installedApps,
+        nfcTags = nfcTags,
+        nfcScansVerifiable = { Build.VERSION.SDK_INT >= NfcScanVerification.FIRST_VERIFIABLE_API },
+        // 0.8: le modalità nominate da una regola devono esistere all'approvazione.
+        userModes = { userModes.snapshot().modes },
+        // 0.8: una regola che nomina un segreto non salvato non si arma (solo i nomi, mai i valori).
+        savedSecrets = { secrets.names() },
     )
 
     @Provides
@@ -1423,6 +1807,10 @@ object ArgusModule {
         audit: AuditSink,
         frame: DispatchFrame,
         root: RootAccess,
+        sentinel: SharedForegroundSentinel,
+        capabilityHealth: CapabilityHealthMonitor,
+        listenerWatchdog: NotificationListenerWatchdog,
+        engine: dagger.Lazy<Engine>,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1445,6 +1833,12 @@ object ArgusModule {
         store = store,
         audit = audit,
         dispatchesIdle = { frame.idle },
+        onStartupReconciled = { sentinel.settle() },
+        capabilityHealth = capabilityHealth::check,
+        listenerWatchdog = listenerWatchdog,
+        // 0.8: un intervallo la cui regola è stata spenta, cancellata, modificata o messa da rivedere rimette i
+        // valori di prima, dentro la cornice di dispatch (wake lock) come ogni esecuzione.
+        spanReconciler = { frame.run { engine.get().reconcileSpans() } },
     )
 
     // --- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21) ---
@@ -1453,6 +1847,37 @@ object ArgusModule {
     @Singleton
     fun automationPauseStore(@ApplicationContext context: Context): AutomationPauseStore =
         PrefsAutomationPauseStore(context)
+
+    // --- 0.7.2: etichette delle regole e pausa per gruppo ---
+
+    @Provides
+    @Singleton
+    fun labelPauseStore(@ApplicationContext context: Context): LabelPauseStore = PrefsLabelPauseStore(context)
+
+    @Provides
+    @Singleton
+    fun ruleLabelStore(database: ArgusDatabase): RoomRuleLabelStore = RoomRuleLabelStore(database)
+
+    @Provides
+    @Singleton
+    fun ruleLabelDirectory(
+        store: RoomRuleLabelStore,
+        pauses: LabelPauseStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): RuleLabelDirectory = RoomRuleLabelDirectory(store, pauses).also { it.startPruning(scope) }
+
+    /**
+     * La pausa letta dal motore e dall'avvio manuale: globale (F21) più gruppi. Dipende dalla directory solo
+     * perché la pulizia delle pause di etichette non più usate parta con il motore, anche senza la UI.
+     */
+    @Provides
+    @Singleton
+    fun labelAwarePause(
+        global: AutomationPauseStore,
+        groups: LabelPauseStore,
+        store: RoomRuleLabelStore,
+        @Suppress("UNUSED_PARAMETER") directory: RuleLabelDirectory,
+    ): LabelAwarePause = LabelAwarePause(global, groups) { id -> store.keysOf(id) }
 
     @Provides
     @Singleton
@@ -1492,7 +1917,7 @@ object ArgusModule {
     fun manualRuleRunner(
         store: AutomationStore,
         tokens: ManualTokenStore,
-        pause: AutomationPauseStore,
+        pause: LabelAwarePause,
         dispatcher: ManualEventDispatcher,
         launcher: ManualWorkLauncher,
     ): ManualRuleRunner = ManualRuleRunner(store, tokens, pause, dispatcher, launcher)

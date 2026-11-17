@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -56,6 +57,17 @@ MAX_PROMPT_BYTES = 100_000
 MAX_REPLY_CHARS = 32_768
 MAX_ACT_REPLY_CHARS = 4_096
 MAX_MODEL_OUTPUT_CHARS = 256 * 1024
+# Tetto in byte letto dallo stdout di Hermes: 4 byte/char (UTF-8), cosi' un output valido fino a
+# MAX_MODEL_OUTPUT_CHARS non viene mai troncato; oltre, il gruppo di processi viene ucciso.
+MAX_MODEL_OUTPUT_BYTES = MAX_MODEL_OUTPUT_CHARS * 4
+MAX_MODEL_STDERR_BYTES = 64 * 1024
+# Attesa massima per lo svuotamento delle pipe dopo l'uscita del figlio diretto.
+PIPE_DRAIN_GRACE_SECONDS = 2.0
+# Server HTTP: timeout per singola recv (anche sugli header), scadenza totale del body e tetto alle
+# connessioni simultanee (le eccedenti vengono chiuse subito, senza creare un thread).
+SOCKET_TIMEOUT_SECONDS = 10
+BODY_READ_DEADLINE_SECONDS = 30
+MAX_CONCURRENT_CONNECTIONS = 32
 MAX_CONCURRENT_MODEL_CALLS = 1
 MAX_USAGE_TOKENS = 100_000_000
 MAX_USAGE_API_CALLS = 1_000
@@ -101,6 +113,9 @@ AVAILABLE_TRIGGER_IDS = (
     "sensor.step_detector",
     "sensor.step_counter",
 )
+# Shape of a trigger id a client may announce, known or not, and how many: bounds the input only.
+TRIGGER_ID_RE = re.compile(r"[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31}){0,2}\Z")
+MAX_MANIFEST_TRIGGERS = 64
 ACT_STATE_KEYS = frozenset({
     "ringer", "wifi", "bluetooth", "dnd", "battery", "charging", "airplane", "screen",
 })
@@ -115,6 +130,14 @@ BUILTIN_STATE_VALUES = {
     "screen": "on|off",
 }
 WHATSAPP_PACKAGES = frozenset({"com.whatsapp", "com.whatsapp.w4b"})
+# 0.8: le risposte (anche dell'AI) valgono anche per Telegram, Signal e Google Messaggi, con le stesse
+# garanzie verificate sul telefono. La shell resta solo WhatsApp (validate_trigger).
+REPLY_PACKAGES = WHATSAPP_PACKAGES | frozenset({
+    "org.telegram.messenger",
+    "org.telegram.messenger.web",
+    "org.thoughtcrime.securesms",
+    "com.google.android.apps.messaging",
+})
 ACT_REPLY_TOOL = "whatsapp_reply"
 WEB_SEARCH_TOOL = "web.search"
 
@@ -156,6 +179,9 @@ def _valid_generative_toolset(tools: Any) -> bool:
     GenerativeContract.isAllowedToolset lato app."""
     return (
         isinstance(tools, list)
+        # Type-check PRIMA di `in`/set(): elementi non hashable (liste/dict annidati) farebbero
+        # esplodere set() in TypeError invece di rifiutare pulito (fail-closed).
+        and all(isinstance(t, str) for t in tools)
         and ACT_REPLY_TOOL in tools
         and len(tools) == len(set(tools))
         and all(t in (ACT_REPLY_TOOL, WEB_SEARCH_TOOL) for t in tools)
@@ -168,6 +194,7 @@ def _valid_notification_toolset(tools: Any) -> bool:
     GenerativeContract.isNotificationToolset lato app."""
     return (
         isinstance(tools, list)
+        and all(isinstance(t, str) for t in tools)
         and len(tools) == len(set(tools))
         and all(t == WEB_SEARCH_TOOL for t in tools)
     )
@@ -412,7 +439,17 @@ def _is_int(value: Any) -> bool:
 
 
 def _is_number(value: Any) -> bool:
-    return (isinstance(value, (int, float)) and not isinstance(value, bool))
+    """Numero JSON FINITO (no bool). `1e999` -> inf e NaN vengono rifiutati; math.isfinite solo sui
+    float perche' su int enormi darebbe OverflowError."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _valid_coordinates(lat: Any, lng: Any) -> bool:
+    return _is_number(lat) and _is_number(lng) and -90 <= lat <= 90 and -180 <= lng <= 180
 
 
 def _well_formed_text(value: str) -> bool:
@@ -454,10 +491,33 @@ def _reject_json_constant(_value: str) -> Any:
     raise StrictJsonError("non_finite_number")
 
 
+def _strict_json_float(text: str) -> float:
+    # `1e999` e' JSON valido ma float() lo trasforma in inf: finirebbe nel JSON in cache.
+    value = float(text)
+    if not math.isfinite(value):
+        raise StrictJsonError("non_finite_number")
+    return value
+
+
 STRICT_JSON_DECODER = json.JSONDecoder(
     object_pairs_hook=_strict_json_object,
     parse_constant=_reject_json_constant,
+    parse_float=_strict_json_float,
 )
+
+
+def parse_json_body(raw: bytes) -> Any:
+    """Decodifica strict del body. Ogni errore di parsing e' un StrictJsonError/UnicodeDecodeError/
+    JSONDecodeError (-> 400 invalid_json): JSON annidato troppo in profondita' (RecursionError) e
+    interi oltre il limite di cifre di Python (ValueError) non devono mai arrivare come eccezione."""
+    try:
+        return STRICT_JSON_DECODER.decode(raw.decode("utf-8"))
+    except RecursionError:
+        raise StrictJsonError("too_deep") from None
+    except (StrictJsonError, UnicodeDecodeError, json.JSONDecodeError):
+        raise
+    except ValueError:
+        raise StrictJsonError("invalid_number") from None
 
 
 class RequestError(ValueError):
@@ -703,7 +763,7 @@ def validate_notification_context(value: Any) -> None:
         raise RequestError(400, "invalid_notification_context")
     if (
         not isinstance(value["package"], str)
-        or value["package"] not in WHATSAPP_PACKAGES
+        or value["package"] not in REPLY_PACKAGES
         or value["is_group"] is not False
     ):
         raise RequestError(400, "notification_reply_not_authorized")
@@ -751,11 +811,19 @@ def validate_manifest(value: Any, schema_version: int) -> None:
     triggers = value.get("available_triggers", [])
     if (
         not isinstance(triggers, list)
-        or len(triggers) > len(AVAILABLE_TRIGGER_IDS)
-        or not all(isinstance(item, str) and item in AVAILABLE_TRIGGER_IDS for item in triggers)
-        or triggers != [item for item in AVAILABLE_TRIGGER_IDS if item in triggers]
+        or len(triggers) > MAX_MANIFEST_TRIGGERS
+        or not all(isinstance(item, str) and TRIGGER_ID_RE.fullmatch(item) for item in triggers)
+        or len(triggers) != len(set(triggers))
     ):
         raise RequestError(400, "invalid_manifest")
+    # A newer app may announce triggers this bridge does not know: they are dropped (never offered to
+    # the model, so a draft using them fails trigger_allowed) instead of rejecting the whole manifest.
+    # The known ones keep the canonical order of the contract.
+    known = [item for item in triggers if item in AVAILABLE_TRIGGER_IDS]
+    if known != [item for item in AVAILABLE_TRIGGER_IDS if item in known]:
+        raise RequestError(400, "invalid_manifest")
+    if "available_triggers" in value:
+        value["available_triggers"] = known
     if not _string(value["device_model"], 256) or not _is_int(value["android_api"]):
         raise RequestError(400, "invalid_manifest")
     if not isinstance(value["shizuku_available"], bool):
@@ -1107,6 +1175,121 @@ def _read_usage(path: str) -> dict[str, Any] | None:
     return report if isinstance(report, dict) else None
 
 
+def _pump_stream(
+    stream: Any, sink: bytearray, limit: int, overflow: threading.Event | None
+) -> None:
+    """Legge la pipe a blocchi: tiene al massimo [limit] byte in [sink] e scarta il resto (la pipe
+    resta comunque svuotata, cosi' il figlio non si blocca). Se [overflow] e' dato, lo segnala."""
+    try:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            room = limit - len(sink)
+            if room > 0:
+                sink += chunk[:room]
+            if len(chunk) > room and overflow is not None:
+                overflow.set()
+    except (OSError, ValueError):
+        return
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL all'intero gruppo (il figlio e' leader di una nuova sessione: pgid == pid)."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _run_bounded(
+    command: list[str],
+    *,
+    timeout: float,
+    cwd: Any,
+    env: dict[str, str],
+    max_stdout_bytes: int = MAX_MODEL_OUTPUT_BYTES,
+    max_stderr_bytes: int = MAX_MODEL_STDERR_BYTES,
+) -> subprocess.CompletedProcess:
+    """Come subprocess.run(capture_output, timeout) ma con memoria e processi limitati.
+
+    - Il figlio parte in una nuova sessione; a timeout (o overflow) si uccide TUTTO il gruppo, non
+      solo il figlio diretto, cosi' nessun nipote sopravvive tenendo pipe o risorse.
+    - stdout/stderr sono letti in streaming da thread: stderr oltre il tetto viene scartato;
+      stdout oltre il tetto uccide il gruppo e solleva ModelProcessError(502, model_output_too_large).
+    - Timeout -> subprocess.TimeoutExpired (invariato per i chiamanti, che lo mappano a 504)."""
+    proc = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+        bufsize=0,
+        start_new_session=True,
+    )
+    out = bytearray()
+    err = bytearray()
+    overflow = threading.Event()
+    readers = [
+        threading.Thread(
+            target=_pump_stream, args=(proc.stdout, out, max_stdout_bytes, overflow), daemon=True
+        ),
+        threading.Thread(
+            target=_pump_stream, args=(proc.stderr, err, max_stderr_bytes, None), daemon=True
+        ),
+    ]
+    for reader in readers:
+        reader.start()
+    timed_out = False
+    try:
+        deadline = time.monotonic() + timeout
+        while not overflow.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            try:
+                proc.wait(timeout=min(remaining, 0.05))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        if timed_out or overflow.is_set() or proc.poll() is None:
+            _kill_process_group(proc)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        for reader in readers:
+            reader.join(timeout=PIPE_DRAIN_GRACE_SECONDS)
+        if any(reader.is_alive() for reader in readers):
+            # Un nipote tiene ancora aperta la pipe dopo l'uscita del figlio: via tutto il gruppo.
+            _kill_process_group(proc)
+            for reader in readers:
+                reader.join(timeout=PIPE_DRAIN_GRACE_SECONDS)
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
+    if timed_out:
+        raise subprocess.TimeoutExpired(command, timeout)
+    if overflow.is_set():
+        raise ModelProcessError(502, "model_output_too_large")
+    return subprocess.CompletedProcess(
+        command,
+        proc.returncode if proc.returncode is not None else -signal.SIGKILL,
+        bytes(out).decode("utf-8", errors="replace"),
+        bytes(err).decode("utf-8", errors="replace"),
+    )
+
+
 def run_gpt(prompt: str, tools: str = "clarify") -> tuple[str, dict[str, Any] | None]:
     """Esegue hermes one-shot; ritorna (output, usage-report-raw-o-None)."""
     # Il prompt passa in argv (`-z <prompt>`): oltre il limite il kernel risponde E2BIG. Si rifiuta
@@ -1131,10 +1314,8 @@ def run_gpt(prompt: str, tools: str = "clarify") -> tuple[str, dict[str, Any] | 
     environment.pop("ARGUS_BRIDGE_HOST", None)
     environment.pop("ARGUS_BRIDGE_PORT", None)
     try:
-        completed = subprocess.run(
+        completed = _run_bounded(
             command,
-            capture_output=True,
-            text=True,
             timeout=MODEL_TIMEOUT_SECONDS,
             cwd=HERMES_HOME,
             env=environment,
@@ -1175,7 +1356,7 @@ def parse_model_output(
         return reply.strip()[:MAX_REPLY_CHARS], None, "meta_invalid"
     try:
         meta, end = STRICT_JSON_DECODER.raw_decode(tail, start)
-    except (json.JSONDecodeError, StrictJsonError):
+    except (json.JSONDecodeError, StrictJsonError, RecursionError, ValueError):
         return reply.strip()[:MAX_REPLY_CHARS], None, "meta_invalid"
     trailing = tail[end:].strip().replace("```", "").strip()
     if trailing or not isinstance(meta, dict) or not _exact_keys(meta, {"draft"}, {"error_code"}):
@@ -1211,7 +1392,7 @@ def parse_act_model_output(output: str) -> tuple[str | None, str | None]:
         raise ModelProcessError(502, "model_invalid_output")
     try:
         meta, end = STRICT_JSON_DECODER.raw_decode(tail, start)
-    except (json.JSONDecodeError, StrictJsonError) as error:
+    except (json.JSONDecodeError, StrictJsonError, RecursionError, ValueError) as error:
         raise ModelProcessError(502, "model_invalid_output") from error
     trailing = tail[end:].strip().replace("```", "").strip()
     if trailing or not isinstance(meta, dict) or not _exact_keys(
@@ -1260,7 +1441,7 @@ def _reply_trigger_allowed(trigger: Any, whitelisted_contact_ids: set[str]) -> b
     return (
         isinstance(trigger, dict)
         and trigger.get("type") == "notification"
-        and trigger.get("pkg") in WHATSAPP_PACKAGES
+        and trigger.get("pkg") in REPLY_PACKAGES
         and trigger.get("isGroup") is False
         and trigger.get("conversationId") in whitelisted_contact_ids
     )
@@ -1852,8 +2033,7 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
             _is_number(value["radiusM"]) and 0 < value["radiusM"] <= 100_000
             and isinstance(value["transition"], str)
             and value["transition"] in {"ENTER", "EXIT"}
-            and _is_number(value.get("lat", 0.0)) and _is_number(value.get("lng", 0.0))
-            and -90 <= value.get("lat", 0.0) <= 90 and -180 <= value.get("lng", 0.0) <= 180
+            and _valid_coordinates(value.get("lat", 0.0), value.get("lng", 0.0))
             and _is_int(value.get("loiteringDelayMs", 0)) and value.get("loiteringDelayMs", 0) == 0
             and isinstance(resolve_current, bool)
             and (resolve_current or has_coordinates)
@@ -1982,7 +2162,11 @@ def validate_condition(
         )
     if kind == "app_in_foreground":
         return _string(value["pkg"], 255)
-    return all(_is_number(value[key]) for key in ("lat", "lng", "radiusM")) and value["radiusM"] > 0
+    return (
+        _valid_coordinates(value["lat"], value["lng"])
+        and _is_number(value["radiusM"])
+        and value["radiusM"] > 0
+    )
 
 
 def _has_iso_control(value: str) -> bool:
@@ -2441,12 +2625,33 @@ def act_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     return 200, response
 
 
+def bearer_matches(supplied: Any) -> bool:
+    """Confronto a tempo costante dell'Authorization con `Bearer <TOKEN>`, su BYTE: hmac.compare_digest
+    su str solleva TypeError se contiene caratteri non-ASCII. Un valore non confrontabile (surrogati
+    isolati, tipo errato) e' un normale rifiuto, mai un'eccezione."""
+    if not TOKEN or not isinstance(supplied, str):
+        return False
+    try:
+        supplied_bytes = supplied.encode("utf-8", "surrogateescape")
+        expected_bytes = f"Bearer {TOKEN}".encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(supplied_bytes, expected_bytes)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ArgusBridge/2"
+    # StreamRequestHandler.setup() applica questo timeout al socket PRIMA di leggere la request
+    # line e gli header: un client che non invia nulla (slowloris) non occupa il thread all'infinito.
+    timeout = SOCKET_TIMEOUT_SECONDS
 
-    def _send(self, status: int, value: dict[str, Any], replayed: bool = False) -> None:
+    def _send(
+        self, status: int, value: dict[str, Any], replayed: bool = False, close: bool = False
+    ) -> None:
         body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
+        if close:
+            self.send_header("Connection", "close")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -2458,8 +2663,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path in {"/health", "/health/v2"}:
-            supplied = self.headers.get("Authorization", "")
-            if not TOKEN or not hmac.compare_digest(supplied, f"Bearer {TOKEN}"):
+            if not bearer_matches(self.headers.get("Authorization", "")):
                 self._send(401, {"error": "unauthorized"})
                 return
             if self.path == "/health":
@@ -2484,8 +2688,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in {"/compile", "/act"}:
             self._send(404, {"error": "not_found"})
             return
-        supplied = self.headers.get("Authorization", "")
-        if not TOKEN or not hmac.compare_digest(supplied, f"Bearer {TOKEN}"):
+        if not bearer_matches(self.headers.get("Authorization", "")):
             self._send(401, {"error": "unauthorized"})
             return
         media_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
@@ -2503,10 +2706,14 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > MAX_REQUEST_BYTES:
             self._send(413, {"error": "request_too_large"})
             return
-        self.connection.settimeout(10)
-        raw = self.rfile.read(length)
         try:
-            data = STRICT_JSON_DECODER.decode(raw.decode("utf-8"))
+            raw = self._read_body(length)
+        except RequestError as error:
+            # Body mai arrivato per intero: la connessione non e' piu' allineata, si chiude.
+            self._send(error.status, {"error": error.code}, close=True)
+            return
+        try:
+            data = parse_json_body(raw)
             if self.path == "/compile":
                 validate_request(data, self.headers.get("Idempotency-Key"))
                 device_time_zone = validate_device_time_zone(
@@ -2539,6 +2746,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid_json"})
         except RequestError as error:
             self._send(error.status, {"error": error.code})
+        except Exception:
+            # Fail-closed: risposta generica, mai traceback o dettagli nel body; nel log solo un marker.
+            print("unexpected handler error", flush=True)
+            try:
+                self._send(500, {"error": "internal_error"}, close=True)
+            except OSError:
+                pass
+
+    def _read_body(self, length: int) -> bytes:
+        """Legge esattamente [length] byte con scadenza totale: timeout -> 408, EOF/short read o
+        errore di socket -> 400. Non lascia mai arrivare l'eccezione al chiamante."""
+        deadline = time.monotonic() + BODY_READ_DEADLINE_SECONDS
+        chunks: list[bytes] = []
+        remaining = length
+        while remaining > 0:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise RequestError(408, "request_timeout")
+            try:
+                self.connection.settimeout(min(left, SOCKET_TIMEOUT_SECONDS))
+                chunk = self.rfile.read1(min(remaining, 65_536))
+            except TimeoutError:
+                raise RequestError(408, "request_timeout") from None
+            except (OSError, ValueError):
+                raise RequestError(400, "incomplete_body") from None
+            if not chunk:
+                raise RequestError(400, "incomplete_body")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
     def log_message(self, _format: str, *_args: Any) -> None:
         return
@@ -2546,6 +2783,28 @@ class Handler(BaseHTTPRequestHandler):
 
 class ArgusBridgeServer(ThreadingHTTPServer):
     daemon_threads = True
+
+    def __init__(self, *args: Any, max_connections: int = MAX_CONCURRENT_CONNECTIONS, **kwargs: Any):
+        self._connection_slots = threading.BoundedSemaphore(max_connections)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        # Tetto alle connessioni simultanee: a pieno si chiude subito il socket, senza creare un
+        # thread (niente risposta: costerebbe un write su un client potenzialmente ostile).
+        if not self._connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_slots.release()
 
 
 def main() -> None:

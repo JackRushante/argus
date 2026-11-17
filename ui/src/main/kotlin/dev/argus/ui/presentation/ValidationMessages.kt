@@ -28,6 +28,11 @@ object ValidationMessages {
         "state_query_unavailable",
         "state_query_type_mismatch",
         "app_not_installed",
+        "app_control_freeze_system",
+        "secret_missing",
+        "not_available_yet",
+        // 0.8: il dettaglio è il nome della modalità che manca.
+        "user_mode_unknown",
     )
 
     /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
@@ -51,6 +56,200 @@ object ValidationMessages {
             "La regola ha bisogno di un nome lungo al massimo 120 caratteri.",
         ),
         "no_actions" to t("The rule has no actions.", "La regola non ha azioni."),
+        // 0.8: un tipo (o un campo) che esiste nel modello ma è ancora spento; il dettaglio dice quale.
+        "not_available_yet" to t(
+            "This is not available in this version.",
+            "Non disponibile in questa versione.",
+        ),
+        // --- 0.8: SMS, chiamate, Intent, filtro chiamate ---
+        "sms_number_invalid" to t(
+            "The SMS number is not valid: an optional + and 7 to 15 digits, nothing else.",
+            "Il numero dell'SMS non è valido: + facoltativo e da 7 a 15 cifre, nient'altro.",
+        ),
+        "sms_number_template_invalid" to t(
+            "The SMS recipient is either a number or only a variable with the number of whoever called or texted.",
+            "Il destinatario dell'SMS è un numero oppure solo una variabile col numero di chi ha chiamato o scritto.",
+        ),
+        "sms_number_not_sender" to t(
+            "The SMS recipient variable must be the number of whoever called or texted, as it arrived.",
+            "La variabile del destinatario deve essere il numero di chi ha chiamato o scritto, così com'è arrivato.",
+        ),
+        "sms_text_invalid" to t(
+            "The SMS text is empty or longer than 480 characters.",
+            "Il testo dell'SMS è vuoto o supera i 480 caratteri.",
+        ),
+        "sms_cost" to t(
+            "Sending SMS may cost money. Argus sends at most 10 SMS an hour, 3 an hour to the same number.",
+            "Inviare SMS può costare. Argus ne invia al massimo 10 l'ora, 3 l'ora allo stesso numero.",
+        ),
+        "sms_to_caller" to t(
+            "The SMS goes to whoever called or texted. Caller IDs can be forged: a stranger can make your phone text a number of their choice, even a paid one, up to 3 times an hour.",
+            "L'SMS va a chi ha chiamato o scritto. Il numero di chi chiama si può falsificare: un estraneo può far mandare dal tuo telefono SMS a un numero scelto da lui, anche a pagamento, fino a 3 volte l'ora.",
+        ),
+        "call_number_invalid" to t(
+            "The number to call is not valid: a written number with an optional + and 7 to 15 digits, no * # or pauses.",
+            "Il numero da chiamare non è valido: un numero scritto, + facoltativo e da 7 a 15 cifre, senza * # o pause.",
+        ),
+        "call_cost" to t(
+            "A phone call may cost money. Argus places at most 3 calls an hour.",
+            "Una chiamata può costare. Argus ne fa al massimo 3 l'ora.",
+        ),
+        "intent_target_missing" to t(
+            "The Intent needs an action, or a package and a class together.",
+            "L'Intent ha bisogno di un'azione, oppure di pacchetto e classe insieme.",
+        ),
+        "intent_service_needs_component" to t(
+            "Starting a service needs both the package and the class.",
+            "Per avviare un servizio servono sia il pacchetto sia la classe.",
+        ),
+        "intent_name_invalid" to t(
+            "The Intent action, package, class or MIME type is not valid or has hidden characters.",
+            "Azione, pacchetto, classe o tipo MIME dell'Intent non validi o con caratteri nascosti.",
+        ),
+        "intent_target_forbidden" to t(
+            "An Intent cannot be sent to Argus itself.",
+            "Un Intent non può essere rivolto ad Argus stesso.",
+        ),
+        "intent_action_forbidden" to t(
+            "This Intent action is not allowed: it would call, install, uninstall, delete or reset.",
+            "Questa azione dell'Intent non è ammessa: chiamerebbe, installerebbe, disinstallerebbe, cancellerebbe o resetterebbe.",
+        ),
+        "intent_data_invalid" to t(
+            "The Intent data must be a written address (URI) with a scheme, without variables.",
+            "I dati dell'Intent devono essere un indirizzo (URI) scritto, con uno schema e senza variabili.",
+        ),
+        "intent_data_scheme_forbidden" to t(
+            "The Intent data cannot be a file:, javascript: or intent: address.",
+            "I dati dell'Intent non possono essere un indirizzo file:, javascript: o intent:.",
+        ),
+        "intent_too_many_extras" to t("An Intent has at most 16 extras.", "Un Intent ha al massimo 16 extra."),
+        "intent_extra_invalid" to t(
+            "An Intent extra has an invalid or repeated name, or an empty value or one that does not match its type.",
+            "Un extra dell'Intent ha un nome non valido o ripetuto, oppure un valore vuoto o diverso dal suo tipo.",
+        ),
+        "intent_extra_external_value" to t(
+            "An Intent extra is filled with outside data (a message, a notification or text read from the phone): the other app receives it as it is.",
+            "Un extra dell'Intent è riempito con un dato esterno (messaggio, notifica o testo letto dal telefono): l'altra app lo riceve così com'è.",
+        ),
+        "screen_call_trigger" to t(
+            "Call screening needs the \"incoming call\" trigger.",
+            "Il filtro chiamate richiede il trigger «chiamata in arrivo».",
+        ),
+        "screen_call_sim_filter" to t(
+            "Call screening does not support the SIM filter.",
+            "Il filtro chiamate non ammette il filtro SIM.",
+        ),
+        "screen_call_nested" to t(
+            "Call screening must be one of the main actions, not inside if/while or the end actions.",
+            "Il filtro chiamate va tra le azioni principali, non dentro if/while o nelle azioni di fine.",
+        ),
+        "screen_call_duplicate" to t("A rule can screen calls only once.", "Una regola può filtrare le chiamate una volta sola."),
+        "screen_call_confirm_exit" to t(
+            "Call screening decides before the phone rings: it cannot ask for confirmation or span an interval.",
+            "Il filtro chiamate decide prima dello squillo: non può chiedere conferma né durare un intervallo.",
+        ),
+        "screen_call_condition_slow" to t(
+            "With call screening only time-of-day and day-of-week conditions are allowed: the answer must be immediate.",
+            "Con il filtro chiamate sono ammesse solo condizioni di orario e giorno della settimana: la risposta deve essere immediata.",
+        ),
+        // 0.8: regole-intervallo («finché…, poi rimetti com'era»).
+        "exit_start_one_shot" to t(
+            "A rule that runs only once cannot have an end: it would switch off right after it starts.",
+            "Una regola che scatta una volta sola non può avere una fine: si spegnerebbe subito dopo l'inizio.",
+        ),
+        "exit_trigger_unsupported" to t(
+            "The end cannot be immediate, manual, a single time or a wait in an area.",
+            "La fine non può essere immediata, manuale, a un'ora singola o un'attesa in un'area.",
+        ),
+        "exit_trigger_same_as_start" to t(
+            "The end needs a different trigger from the start.",
+            "La fine deve avere un trigger diverso dall'inizio.",
+        ),
+        "exit_geofence_mismatch" to t(
+            "Start and end on a place must use the same area: arriving (or staying) at the start, leaving at the end.",
+            "Inizio e fine su un luogo devono usare la stessa area: l'arrivo (o la sosta) all'inizio, l'uscita alla fine.",
+        ),
+        "exit_calendar_same_phase" to t(
+            "Start and end on the calendar must be one the start of an event and the other its end.",
+            "Inizio e fine sul calendario devono essere uno l'inizio di un evento e l'altra la sua fine.",
+        ),
+        "exit_sensor_same_kind" to t(
+            "Start and end on the sensors must use two different gestures.",
+            "Inizio e fine sui sensori devono usare due gesti diversi.",
+        ),
+        "exit_nfc_resolve_unsupported" to t(
+            "The tag that ends the rule must already be known: it cannot be read at activation.",
+            "Il tag che chiude la regola deve essere già noto: non si legge all'attivazione.",
+        ),
+        "exit_app_usage_twice" to t(
+            "Start and end cannot both be app usage times.",
+            "Inizio e fine non possono essere entrambi tempi d'uso di un'app.",
+        ),
+        "exit_nothing_to_do" to t(
+            "The end neither puts values back nor runs actions: it would do nothing.",
+            "La fine non rimette i valori e non ha azioni: non farebbe nulla.",
+        ),
+        "exit_nothing_to_restore" to t(
+            "No start action changes a value that the end can put back.",
+            "Nessuna azione d'inizio cambia un valore che la fine possa rimettere.",
+        ),
+        "exit_ask_unsupported" to t(
+            "The end actions cannot ask questions: the end does not wait for answers.",
+            "Le azioni di fine non possono fare domande: la fine non aspetta risposte.",
+        ),
+        "exit_var_trigger_payload_unsupported" to t(
+            "A variable reads the start message, which is not there at the end: the end actions could never run.",
+            "Una variabile legge il messaggio d'inizio, che alla fine non c'è: le azioni di fine non partirebbero mai.",
+        ),
+        // 0.8: «chiedimi prima», domande con pulsanti, risposte AI vincolate.
+        "confirm_timeout_invalid" to t(
+            "The confirmation must wait between 30 seconds and 60 minutes.",
+            "La conferma deve aspettare fra 30 secondi e 60 minuti.",
+        ),
+        "confirm_one_shot_unsupported" to t(
+            "A rule that runs only once cannot ask for confirmation: it switches off before you answer.",
+            "Una regola che scatta una volta sola non può chiedere conferma: si spegne prima della risposta.",
+        ),
+        "ask_prompt_invalid" to t(
+            "The question is required and can be at most 120 characters, on one line.",
+            "La domanda è obbligatoria, al massimo 120 caratteri su una riga.",
+        ),
+        "ask_choices_invalid" to t(
+            "A question needs 2 to 4 different choices of 1 to 24 characters.",
+            "Una domanda vuole da 2 a 4 scelte diverse, da 1 a 24 caratteri.",
+        ),
+        "ask_timeout_invalid" to t(
+            "A question can wait from 10 seconds to 60 minutes.",
+            "Una domanda può aspettare da 10 secondi a 60 minuti.",
+        ),
+        "ask_default_invalid" to t(
+            "The default answer must be one of the choices.",
+            "La risposta predefinita deve essere una delle scelte.",
+        ),
+        "llm_output_requires_capture" to t(
+            "A constrained AI answer must be saved in a variable.",
+            "Una risposta AI vincolata va salvata in una variabile.",
+        ),
+        "llm_output_choices_invalid" to t(
+            "The AI answer needs 2 to 8 different labels (a-z, 0-9, _ and -, up to 24 characters).",
+            "La risposta AI vuole da 2 a 8 etichette diverse (a-z, 0-9, _ e -, al massimo 24 caratteri).",
+        ),
+        "llm_output_choices_forbidden" to t(
+            "Only a choice answer has labels.",
+            "Solo una risposta a scelta ha etichette.",
+        ),
+        "llm_output_bounds_required" to t(
+            "A numeric AI answer needs both a minimum and a maximum.",
+            "Una risposta AI numerica vuole sia un minimo sia un massimo.",
+        ),
+        "llm_output_bounds_invalid" to t(
+            "The minimum must not exceed the maximum, within ±10^15.",
+            "Il minimo non può superare il massimo, entro ±10^15.",
+        ),
+        "llm_output_bounds_forbidden" to t(
+            "Only a numeric answer has a minimum and a maximum.",
+            "Solo una risposta numerica ha un minimo e un massimo.",
+        ),
         "cooldown_invalid" to t("The cooldown cannot be negative.", "Il cooldown non può essere negativo."),
         "cooldown_raised" to t(
             "Cooldown below 60 s on an AI rule: Argus will enforce 60 s.",
@@ -88,6 +287,10 @@ object ValidationMessages {
             "The worst-case running time is over 6 hours: reduce repeats, delays or long actions.",
             "Il tempo massimo di esecuzione supera le 6 ore: riduci ripetizioni, attese o azioni lunghe.",
         ),
+        "generative_in_loop" to t(
+            "An AI call is inside a repeat: it can run on every round, up to 30 AI calls each time the rule runs.",
+            "Una chiamata AI è dentro una ripetizione: può partire a ogni giro, fino a 30 chiamate AI a ogni esecuzione della regola.",
+        ),
 
         // --- Trigger --------------------------------------------------------------------------
         "time_spec" to t(
@@ -96,6 +299,10 @@ object ValidationMessages {
         ),
         "tz_invalid" to t("The time zone is not valid.", "Il fuso orario non è valido."),
         "cron_invalid" to t("The schedule expression is not valid.", "L'espressione di pianificazione non è valida."),
+        "cron_never_fires" to t(
+            "The schedule never matches a real date (for example 30 February), so the rule would never run.",
+            "La pianificazione non corrisponde a nessuna data reale (per esempio il 30 febbraio): la regola non scatterebbe mai.",
+        ),
         "at_invalid" to t("The date and time are not valid.", "La data e l'ora non sono valide."),
         "after_ms_invalid" to t(
             "The delay must be between 1 second and 7 days.",
@@ -118,16 +325,41 @@ object ValidationMessages {
             "Raggio sotto i 100 m: lo scatto in background può arrivare con minuti di ritardo.",
         ),
         "loitering_invalid" to t(
-            "The loitering delay is out of range.",
-            "L'attesa di permanenza è fuori intervallo.",
-        ),
-        "geofence_transition_unsupported" to t(
-            "Only entering or leaving a place is supported, not dwelling.",
-            "Sono supportati solo l'ingresso e l'uscita da un luogo, non la permanenza.",
+            "Staying in a place must last from 1 to 120 minutes.",
+            "La permanenza in un luogo deve durare da 1 a 120 minuti.",
         ),
         "geofence_loitering_unsupported" to t(
-            "The loitering delay needs dwell detection, which is not available.",
-            "L'attesa di permanenza richiede il rilevamento della sosta, non disponibile.",
+            "A waiting time only applies to staying in a place, not to entering or leaving it.",
+            "Un'attesa vale solo per la permanenza in un luogo, non per l'ingresso o l'uscita.",
+        ),
+        // 0.8: trigger fisici.
+        "nfc_tag_missing" to t(
+            "The NFC tag is missing: it is read when you turn on the rule.",
+            "Manca il tag NFC: si legge quando attivi la regola.",
+        ),
+        "nfc_tag_invalid" to t(
+            "The NFC tag id is not valid.",
+            "L'identificativo del tag NFC non è valido.",
+        ),
+        "nfc_scan_unverifiable" to t(
+            "Before Android 15 a tag scan cannot be proven to come from the phone: shell commands and screen macros of this rule will never run, the other actions will.",
+            "Prima di Android 15 non si può provare che una lettura del tag venga dal telefono: comandi shell e macro sullo schermo di questa regola non partiranno mai, le altre azioni sì.",
+        ),
+        "nfc_scan_verified_only" to t(
+            "Shell commands and screen macros of this rule run only when the phone proves the tag scan came from its NFC service; otherwise only the other actions run.",
+            "Comandi shell e macro sullo schermo di questa regola partono solo se il telefono prova che la lettura del tag viene dal suo servizio NFC; altrimenti partono solo le altre azioni.",
+        ),
+        "nfc_tag_ambiguous" to t(
+            "The NFC tag is already set: it cannot also be read again when you turn on the rule.",
+            "Il tag NFC è già impostato: non si può anche rileggere quando attivi la regola.",
+        ),
+        "next_alarm_offset_invalid" to t(
+            "The time before the next alarm must be 0 to 180 minutes.",
+            "Il tempo prima della prossima sveglia deve essere da 0 a 180 minuti.",
+        ),
+        "app_usage_minutes_invalid" to t(
+            "The time of use must be 1 to 1440 minutes.",
+            "Il tempo d'uso deve essere da 1 a 1440 minuti.",
         ),
         "geofence_coords" to t(
             "The coordinates are missing or out of range.",
@@ -185,6 +417,27 @@ object ValidationMessages {
         "time_window_invalid" to t(
             "The time window is not valid: use HH:mm and a time zone.",
             "La finestra oraria non è valida: usa HH:mm e un fuso orario.",
+        ),
+        // 0.8: condizioni di contesto e trigger del calendario.
+        "weekday_invalid" to t(
+            "The days condition needs at least one day and a valid time zone.",
+            "La condizione sui giorni ha bisogno di almeno un giorno e di un fuso orario valido.",
+        ),
+        "wifi_ssid_invalid" to t(
+            "Write the Wi-Fi network name (up to 32 characters).",
+            "Scrivi il nome della rete Wi-Fi (al massimo 32 caratteri).",
+        ),
+        "bluetooth_device_invalid" to t(
+            "Write the Bluetooth device name or address.",
+            "Scrivi il nome o l'indirizzo del dispositivo Bluetooth.",
+        ),
+        "calendar_filter_invalid" to t(
+            "Write the event title or the calendar name, or leave the filter out.",
+            "Scrivi il titolo dell'evento o il nome del calendario, oppure togli il filtro.",
+        ),
+        "calendar_offset_invalid" to t(
+            "The calendar offset must be between -120 and 120 minutes.",
+            "Lo spostamento rispetto all'evento deve essere tra -120 e 120 minuti.",
         ),
         "state_key_unknown" to t(
             "The device state used in a condition is not known.",
@@ -274,8 +527,8 @@ object ValidationMessages {
             "Una variabile orologio ha un formato dell'ora non valido o più lungo di 40 caratteri (per esempio HH:mm o EEEE d MMMM).",
         ),
         "var_literal_invalid" to t(
-            "A fixed value is too long or contains control characters.",
-            "Un valore fisso è troppo lungo o contiene caratteri di controllo.",
+            "A fixed value is too long, contains control characters, or was removed when the rule was shared: write it again.",
+            "Un valore fisso è troppo lungo, contiene caratteri di controllo oppure è stato tolto quando la regola è stata condivisa: riscrivilo.",
         ),
         "var_literal_type_invalid" to t(
             "A fixed value does not match its declared type.",
@@ -322,8 +575,24 @@ object ValidationMessages {
             "I dati esterni non sono ammessi in questo campo di comando o destinazione.",
         ),
         "interpolation_shell_context" to t(
-            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document or comment): the action would be blocked when it runs.",
-            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document o commento): l'azione verrebbe bloccata all'esecuzione.",
+            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document, comment, a variable name, or a number with other text attached): the action would be blocked when it runs.",
+            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document, commento, nome di variabile o numero con altro testo attaccato): l'azione verrebbe bloccata all'esecuzione.",
+        ),
+        "interpolation_shell_command_position" to t(
+            "External data is in the command name position: it would choose which program runs. Write the command name literally.",
+            "Un dato esterno è al posto del nome del comando: sceglierebbe quale programma parte. Scrivi il nome del comando per esteso.",
+        ),
+        "interpolation_shell_reevaluated" to t(
+            "External data goes to a command that reads it again as code (sh -c, eval, su, xargs, awk, sed, find -exec…): quotes cannot protect it, so the action could never run.",
+            "Un dato esterno va a un comando che lo rilegge come codice (sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono, quindi l'azione non potrebbe mai partire.",
+        ),
+        "interpolation_shell_numeric" to t(
+            "External data is used where the shell computes a number: when the rule runs it must be a whole number, otherwise the action is blocked.",
+            "Un dato esterno è usato dove la shell calcola un numero: quando la regola gira deve essere un numero intero, altrimenti l'azione si blocca.",
+        ),
+        "interpolation_shell_option" to t(
+            "External data starts a command argument with no \"--\" before it: a value starting with \"-\" would be read as an option.",
+            "Un dato esterno apre un argomento del comando senza \"--\" prima: un valore che inizia con \"-\" verrebbe letto come un'opzione.",
         ),
         "secret_interpolation_disclosure" to t(
             "A secret variable will be sent to the configured AI service.",
@@ -355,6 +624,10 @@ object ValidationMessages {
         "url_invalid" to t(
             "The URL is not valid or its scheme is not allowed.",
             "L'URL non è valido o lo schema non è consentito.",
+        ),
+        "url_userinfo" to t(
+            "The URL has a name or credentials before \"@\": the address would open a different site than the one it seems to show.",
+            "L'URL ha un nome o delle credenziali prima di \"@\": l'indirizzo aprirebbe un sito diverso da quello che sembra.",
         ),
         "title_invalid" to t("The title is missing or too long.", "Il titolo manca o è troppo lungo."),
         "text_invalid" to t("The text is missing or too long.", "Il testo manca o è troppo lungo."),
@@ -413,6 +686,10 @@ object ValidationMessages {
             "The setting name is not valid (shape or length).",
             "Il nome dell'impostazione non è valido (forma o lunghezza).",
         ),
+        "write_setting_key_interpolated" to t(
+            "The setting name must be written literally, without variables.",
+            "Il nome dell'impostazione va scritto per esteso, senza variabili.",
+        ),
         "write_setting_value_invalid" to t(
             "The setting value is empty, too long or contains control characters.",
             "Il valore dell'impostazione è vuoto, troppo lungo o contiene caratteri di controllo.",
@@ -422,12 +699,16 @@ object ValidationMessages {
             "L'impostazione viene scritta esattamente come mostrato nella regola: controlla namespace, nome e valore.",
         ),
         "write_setting_high_impact" to t(
-            "This rule changes a phone security setting (debugging, accessibility, keyboard or app verification). Only arm it if you know what it does.",
-            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+            "This rule changes a phone security setting (debugging, accessibility, keyboard, app verification, notification access, autofill, assistant, proxy or DNS). Only arm it if you know what it does.",
+            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera, verifica delle app, accesso alle notifiche, compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
         ),
         "write_setting_external_value" to t(
-            "The value written comes from external data (a message or notification).",
-            "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+            "The value written comes from external data (a message, a notification or text read from the phone).",
+            "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
+        ),
+        "invisible_characters" to t(
+            "The command, address or setting contains invisible or text-direction characters: what you see may not be what runs.",
+            "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano la direzione del testo: quello che vedi può non essere quello che viene eseguito.",
         ),
 
         // --- Azioni generative ----------------------------------------------------------------
@@ -540,8 +821,17 @@ object ValidationMessages {
             "Una risposta richiede un trigger di notifica.",
         ),
         "reply_wrong_package" to t(
-            "A WhatsApp reply needs a recognized WhatsApp package.",
-            "Una risposta WhatsApp richiede un package WhatsApp riconosciuto.",
+            "This reply does not work with the app of the trigger: WhatsApp uses the WhatsApp reply; Telegram, Signal and Google Messages use the notification reply.",
+            "Questa risposta non vale per l'app del trigger: WhatsApp usa la risposta WhatsApp; Telegram, Signal e Google Messaggi la risposta alla notifica.",
+        ),
+        // 0.8: risposte su Telegram, Signal e Google Messaggi.
+        "reply_app_unsupported" to t(
+            "Automatic replies are not available for this app: its notifications do not identify the chat reliably.",
+            "Le risposte automatiche non sono disponibili per questa app: le sue notifiche non identificano la chat in modo affidabile.",
+        ),
+        "reply_conversation_unstable" to t(
+            "Pick the chat from the whitelist: outside WhatsApp only a chat the app itself identifies can receive replies.",
+            "Scegli la chat dalla whitelist: fuori da WhatsApp solo una chat che l'app stessa identifica può ricevere risposte.",
         ),
         "reply_target_group" to t(
             "Automatic replies are only allowed in verified one-to-one chats.",
@@ -554,6 +844,31 @@ object ValidationMessages {
         "target_not_whitelisted" to t(
             "The conversation is not in the whitelist.",
             "La conversazione non è in whitelist.",
+        ),
+        // 0.8: azioni sulla notifica che ha avviato la regola.
+        "notification_action_no_notification" to t(
+            "Acting on a notification needs a notification trigger.",
+            "Per agire su una notifica serve un trigger di notifica.",
+        ),
+        "notification_action_label_invalid" to t(
+            "Pressing a button needs its visible text (one line, up to 100 characters); dismiss and snooze have none.",
+            "Per premere un pulsante serve il suo testo visibile (una riga, al massimo 100 caratteri); chiudi e posticipa non ne hanno.",
+        ),
+        "notification_action_label_interpolated" to t(
+            "The button text must be written out, without variables.",
+            "Il testo del pulsante va scritto per intero, senza variabili.",
+        ),
+        "notification_action_snooze_invalid" to t(
+            "Snooze needs a duration from 1 to 1440 minutes; the other operations have none.",
+            "Posticipa richiede una durata da 1 a 1440 minuti; le altre operazioni non ne hanno.",
+        ),
+        "notification_action_forbidden_app" to t(
+            "Argus never presses buttons on notifications of this app (system, permissions, store or Argus).",
+            "Argus non preme mai pulsanti nelle notifiche di questa app (sistema, permessi, store o Argus).",
+        ),
+        "notification_click_review" to t(
+            "Argus will press this button for you, in the app of the trigger, every time the rule fires.",
+            "Argus premerà questo pulsante al posto tuo, nell'app del trigger, ogni volta che la regola scatta.",
         ),
 
         // --- Approvazione e arm ---------------------------------------------------------------
@@ -628,6 +943,35 @@ object ValidationMessages {
             "Another active rule sets dark mode to a different value on triggers that may overlap.",
             "Un'altra regola attiva imposta la modalità scura su un valore diverso con trigger che possono sovrapporsi.",
         ),
+        "conflict_user_mode" to t(
+            "Another active rule sets the user mode to a different value on triggers that may overlap.",
+            "Un'altra regola attiva imposta la modalità utente su un valore diverso con trigger che possono sovrapporsi.",
+        ),
+        // --- 0.8 · valori conservati e modalità ---
+        "stored_key_invalid" to t(
+            "A saved variable name uses lowercase letters, digits and _, starts with a letter, at most 32 characters.",
+            "Il nome di una variabile salvata usa lettere minuscole, cifre e _, inizia con una lettera, al massimo 32 caratteri.",
+        ),
+        "set_stored_invalid" to t(
+            "Saving a variable needs a value of at most 1024 characters to set, at most a whole number to add, and nothing to toggle or delete.",
+            "Salvare una variabile richiede un valore di al massimo 1024 caratteri da impostare, al più un numero intero da aggiungere e nessun valore per invertire o cancellare.",
+        ),
+        "stored_compare_invalid" to t(
+            "The comparison on a saved variable does not fit its type.",
+            "Il confronto su una variabile salvata non è adatto al suo tipo.",
+        ),
+        "user_mode_name_invalid" to t(
+            "A mode name is written as is, 1 to 24 characters.",
+            "Il nome di una modalità è scritto per intero, da 1 a 24 caratteri.",
+        ),
+        "user_mode_unknown" to t(
+            "This rule uses a mode that does not exist: add it in System › Modes, or change the rule.",
+            "Questa regola usa una modalità che non esiste: aggiungila in Sistema › Modalità oppure cambia la regola.",
+        ),
+        "user_mode_unavailable" to t(
+            "The list of modes could not be read.",
+            "Non è stato possibile leggere l'elenco delle modalità.",
+        ),
 
         // --- 0.4.1 · azioni senza Shizuku e richiesta HTTP --------------------------------------
         "speak_text_invalid" to t(
@@ -643,8 +987,8 @@ object ValidationMessages {
             "Il livello di luminosità deve essere tra 0 e 100.",
         ),
         "http_url_invalid" to t(
-            "The request address must start with https:// (http:// is allowed only for localhost) and cannot contain a user name or password.",
-            "L'indirizzo della richiesta deve iniziare con https:// (http:// è ammesso solo per localhost) e non può contenere nome utente o password.",
+            "The request address must start with https:// (http:// only towards this phone or your own network) and cannot contain a user name or password.",
+            "L'indirizzo della richiesta deve iniziare con https:// (http:// solo verso questo telefono o la tua rete) e non può contenere nome utente o password.",
         ),
         "http_url_interpolated" to t(
             "The request address is fixed: it cannot contain a \${variable}.",
@@ -661,6 +1005,10 @@ object ValidationMessages {
         "http_header_invalid" to t(
             "A header is not valid: check its name and value (not empty, no line breaks, no duplicates; Host, Content-Length, Transfer-Encoding and Connection are not allowed).",
             "Un'intestazione non è valida: controlla nome e valore (non vuoto, senza a capo, senza duplicati; Host, Content-Length, Transfer-Encoding e Connection non sono ammessi).",
+        ),
+        "http_header_not_ascii" to t(
+            "A header value can only use plain ASCII characters: no accented letters, curly quotes or emoji. The request would fail every time.",
+            "Il valore di un'intestazione può usare solo caratteri ASCII semplici: niente lettere accentate, virgolette tipografiche o emoji. La richiesta fallirebbe ogni volta.",
         ),
         "http_content_type_invalid" to t(
             "The content type is not valid or differs from the Content-Type header.",
@@ -682,6 +1030,43 @@ object ValidationMessages {
             "External data sits in the JSON body outside a quoted string: the action would be blocked when it runs.",
             "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: l'azione verrebbe bloccata all'esecuzione.",
         ),
+        // --- 0.8 · risposta catturata, segreti della cassaforte, http sulla rete locale ---------------
+        "http_cleartext_local" to t(
+            "The request travels unencrypted on your network.",
+            "La richiesta viaggia senza cifratura sulla tua rete.",
+        ),
+        "http_cleartext_secret" to t(
+            "A secret never travels unencrypted: on your network the request needs https:// (http:// only towards this phone).",
+            "Un segreto non viaggia mai senza cifratura: sulla tua rete la richiesta deve usare https:// (http:// solo verso questo telefono).",
+        ),
+        "http_extract_without_capture" to t(
+            "The part of the response to take only makes sense when the response is kept in a variable.",
+            "La parte della risposta da prendere ha senso solo se la risposta viene conservata in una variabile.",
+        ),
+        "http_extract_invalid" to t(
+            "The JSON pointer is not valid: it starts with / (for example /current/temp) and is written out in full.",
+            "Il puntatore JSON non è valido: inizia con / (per esempio /current/temp) ed è scritto per intero.",
+        ),
+        "http_secrets_too_many" to t(
+            "At most 10 headers in all, secret ones included, and 10 secret query parameters.",
+            "Al massimo 10 intestazioni in tutto, segrete comprese, e 10 parametri di query segreti.",
+        ),
+        "secret_name_invalid" to t(
+            "A secret's name has lowercase letters, digits and _ only, starts with a letter and is at most 32 characters.",
+            "Il nome di un segreto ha solo lettere minuscole, cifre e _, inizia con una lettera ed è lungo al massimo 32 caratteri.",
+        ),
+        "http_secret_ref_invalid" to t(
+            "A secret header or query parameter is not valid (name, repeated, Content-Type, or a prefix that is too long or has a \${variable}).",
+            "Un'intestazione o un parametro segreto non è valido (nome, ripetuto, Content-Type, o un prefisso troppo lungo o con una \${variabile}).",
+        ),
+        "http_secret_header_conflict" to t(
+            "A secret header has the same name as another header.",
+            "Un'intestazione segreta ha lo stesso nome di un'altra intestazione.",
+        ),
+        "secret_missing" to t(
+            "This rule uses a secret that is not saved on this phone: add it in System › Secrets.",
+            "Questa regola usa un segreto non salvato su questo telefono: aggiungilo in Sistema › Segreti.",
+        ),
 
         // --- 0.5.1 · azioni privilegiate tipizzate ----------------------------------------------
         "priv_pkg_invalid" to t(
@@ -689,8 +1074,8 @@ object ValidationMessages {
             "Il package dell'app manca, non è valido o è una \${variabile}: va scritto per intero, come com.example.app.",
         ),
         "priv_target_forbidden" to t(
-            "A rule cannot change Argus, the launcher or an essential system app (system UI, phone, Settings, Google services).",
-            "Una regola non può modificare Argus, il launcher o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, servizi Google).",
+            "A rule cannot change Argus, the launcher, the keyboard, WebView or an essential system app (system UI, phone, Settings, permissions, Google services, Shizuku, root managers).",
+            "Una regola non può modificare Argus, il launcher, la tastiera, WebView o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, permessi, servizi Google, Shizuku, gestori root).",
         ),
         "priv_permission_invalid" to t(
             "Only runtime permissions of the allowed list can be granted or revoked (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices).",
@@ -699,6 +1084,11 @@ object ValidationMessages {
         "app_control_freeze_review" to t(
             "Freezing disables the app: it disappears from the launcher and cannot start until it is unfrozen.",
             "Congelare disattiva l'app: sparisce dal launcher e non può partire finché non viene riattivata.",
+        ),
+        // 0.7.2: controllo fatto sul telefono all'approvazione; solo avviso, la regola resta armabile.
+        "app_control_freeze_system" to t(
+            "This rule freezes an app that came with the phone. That is fine for preinstalled apps you do not use, but some are needed by the system: freeze it only if you know it is safe.",
+            "Questa regola congela un'app preinstallata sul telefono. Va bene per le app del produttore che non usi, ma alcune servono al sistema: congelala solo se sai che si può.",
         ),
         "app_permission_revoke_review" to t(
             "Revoking a permission removes an access from the app, and Android may close it.",
@@ -718,8 +1108,8 @@ object ValidationMessages {
             "L'app da aprire non è un nome di package valido (è fisso: niente \${variabile}).",
         ),
         "ui_pkg_forbidden" to t(
-            "A screen macro cannot act on Argus, on Settings, on the package installer or on permission dialogs.",
-            "Una macro sullo schermo non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti né sui dialoghi dei permessi.",
+            "A screen macro cannot act on Argus, Settings, the system interface, the package installer, the Play Store, permission, VPN or certificate dialogs, Shizuku, root managers or the phone maker's security apps.",
+            "Una macro sullo schermo non può agire su Argus, Impostazioni, interfaccia di sistema, installatore di pacchetti, Play Store, dialoghi dei permessi, della VPN o dei certificati, Shizuku, gestori root né sulle app di sicurezza del produttore.",
         ),
         // Un errore per passo (0.7.0): il numero del passo sta nel `detail` e si antepone al testo.
         "ui_step_wait_no_target" to t(

@@ -4,6 +4,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.AudioOutputKind
+import dev.argus.engine.model.CalendarPhase
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.MediaPlayState
@@ -18,12 +19,21 @@ sealed interface TriggerEvent {
     sealed interface Registered : TriggerEvent {
         val automationId: AutomationId
         val approvalFingerprint: ApprovalFingerprint
+
+        /**
+         * 0.8 (regole-intervallo): la parte della regola per cui la sorgente ha programmato l'evento, quando il
+         * tipo dell'evento da solo non la dice (una sveglia d'inizio e una di fine sono entrambe [TimeFired]).
+         * null = la decide il matcher (transizione del geofence, fase del calendario, tipo di sensore).
+         */
+        val spanPhase: SpanPhase? get() = null
     }
 
     /** Trigger schedulati per-automazione: portano l'id. */
     data class TimeFired(
         override val automationId: AutomationId,
         override val approvalFingerprint: ApprovalFingerprint,
+        /** 0.8: la sveglia d'inizio o quella di fine di una regola-intervallo. */
+        override val spanPhase: SpanPhase = SpanPhase.START,
     ) : Registered
 
     /** Fire una-tantum all'arm della regola immediate: mirror esatto di [TimeFired], porta l'id
@@ -103,4 +113,60 @@ sealed interface TriggerEvent {
 
     /** [pkg] è passata in primo piano ([AppEventKind.OPENED]) o lo ha lasciato ([AppEventKind.CLOSED]). */
     data class AppForegroundChanged(val pkg: String, val event: AppEventKind) : TriggerEvent
+
+    // --- 0.8 scaffold: eventi dei trigger nuovi. Nessuna sorgente li produce finché il trigger è spento. ---
+
+    /**
+     * Inizio o fine (spostati dell'offset approvato) di un evento di calendario che combacia coi filtri
+     * della regola: lo programma la sorgente per la regola, come una sveglia, quindi porta id e impronta.
+     * Il calendario dell'evento non entra nel core; il [title] sì, solo in RAM, per il payload `TITLE`
+     * della regola (dato esterno, TAINTED: un invito lo scrive un altro). Mai nei log.
+     */
+    data class CalendarEventFired(
+        override val automationId: AutomationId,
+        val phase: CalendarPhase,
+        override val approvalFingerprint: ApprovalFingerprint,
+        val title: String? = null,
+    ) : Registered {
+        override fun toString(): String =
+            "CalendarEventFired(automationId=$automationId, phase=$phase, " +
+                "approvalFingerprint=$approvalFingerprint, title=${title?.let { "<redacted>" }})"
+    }
+
+    /**
+     * Un tag NFC letto dal telefono. [tagId] vive solo in RAM per il match: mai persistito né loggato.
+     *
+     * [verified] = la scansione viene provatamente dal servizio NFC di sistema (Android 15+: uid del chiamante
+     * iniziale dell'activity dei tag). Quell'activity è esportata: qualunque app può avviarla con un id
+     * inventato, quindi una scansione non verificata non preme mai l'interruttore della shell né delle macro
+     * sullo schermo (vedi `StaticShellSafety`). Il default è il caso peggiore.
+     */
+    data class NfcTagScanned(val tagId: String, val verified: Boolean = false) : TriggerEvent {
+        override fun toString(): String = "NfcTagScanned(tagId=<redacted>, verified=$verified)"
+    }
+
+    /** L'istante «offset minuti prima della prossima sveglia» della regola: programmato per regola. */
+    data class NextAlarmFired(
+        override val automationId: AutomationId,
+        override val approvalFingerprint: ApprovalFingerprint,
+        /** 0.8: come [TimeFired.spanPhase]. */
+        override val spanPhase: SpanPhase = SpanPhase.START,
+    ) : Registered
+
+    /**
+     * Il tempo in primo piano di oggi di [pkg], in minuti, è passato da [previousMinutes] a [currentMinutes]:
+     * il matcher decide se la soglia della regola è stata attraversata.
+     */
+    data class AppUsageChanged(
+        val pkg: String,
+        val previousMinutes: Int,
+        val currentMinutes: Int,
+    ) : TriggerEvent
+
+    /**
+     * La modalità utente è passata da [from] (null = nessuna o ignota) a [to]. [chained] = il cambio l'ha
+     * fatto una regola scattata a sua volta da un cambio di modalità: nessuna regola `user_mode_changed`
+     * lo riceve (il [TriggerMatcher] lo rifiuta), così due regole non si rimbalzano la modalità all'infinito.
+     */
+    data class UserModeChanged(val to: String, val from: String?, val chained: Boolean = false) : TriggerEvent
 }

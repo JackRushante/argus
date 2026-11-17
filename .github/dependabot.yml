@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Kotlin, its Gradle plugins (including the Compose compiler plugin) and KSP move together:
+      # each KSP release is built for one Kotlin version.
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin:*"
+          - "org.jetbrains.kotlin.*"
+          - "com.google.devtools.ksp*"
+      kotlinx:
+        patterns:
+          - "org.jetbrains.kotlinx:*"
+      test:
+        patterns:
+          - "junit:junit"
+          - "org.robolectric:*"
+          - "androidx.test*"
+      androidx:
+        patterns:
+          - "androidx.*"
+        exclude-patterns:
+          - "androidx.test*"
+      hilt:
+        patterns:
+          - "com.google.dagger*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -51,8 +51,21 @@ internal object RulesBackupText {
         return "$imported; $discarded."
     }
 
-    private fun reasons(summary: ImportSummary, language: RenderLanguage): String {
-        val entries = summary.discarded.filterValues { it > 0 }.entries.sortedBy { it.key.ordinal }
+    /** 0.7.2, anteprima: «1 voce verrà scartata (regola non valida).»; null se non si scarta nulla. */
+    fun previewDiscarded(discarded: Map<RuleDiscardReason, Int>, language: RenderLanguage): String? {
+        val total = discarded.values.sum()
+        if (total <= 0) return null
+        val why = reasons(discarded, language)
+        return language.pick(
+            if (total == 1) "1 entry will be discarded ($why)." else "$total entries will be discarded ($why).",
+            if (total == 1) "1 voce verrà scartata ($why)." else "$total voci verranno scartate ($why).",
+        )
+    }
+
+    private fun reasons(summary: ImportSummary, language: RenderLanguage): String = reasons(summary.discarded, language)
+
+    private fun reasons(discarded: Map<RuleDiscardReason, Int>, language: RenderLanguage): String {
+        val entries = discarded.filterValues { it > 0 }.entries.sortedBy { it.key.ordinal }
         if (entries.size == 1) return reason(entries.single().key, language)
         return entries.joinToString(", ") { (why, count) -> "${reason(why, language)}: $count" }
     }
@@ -88,6 +101,18 @@ internal object RulesBackupText {
         BackupFailure.NOT_JSON -> language.pick(
             "The file is damaged or is not a JSON file.",
             "Il file è danneggiato o non è un file JSON.",
+        )
+        BackupFailure.PASSPHRASE_REQUIRED -> language.pick(
+            "This backup is encrypted: enter its passphrase.",
+            "Questo backup è cifrato: inserisci la sua passphrase.",
+        )
+        BackupFailure.WRONG_PASSPHRASE -> language.pick(
+            "Wrong passphrase, or the file was changed after the backup. Nothing was imported.",
+            "Passphrase errata, oppure il file è stato modificato dopo il backup. Non è stato importato nulla.",
+        )
+        BackupFailure.ENCRYPTED_DAMAGED -> language.pick(
+            "The encrypted backup is incomplete: the file was cut short.",
+            "Il backup cifrato è incompleto: il file è stato troncato.",
         )
         BackupFailure.WRONG_FORMAT -> language.pick(
             "This is not an Argus rules export.",

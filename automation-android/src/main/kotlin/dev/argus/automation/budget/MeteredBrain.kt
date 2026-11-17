@@ -19,6 +19,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -26,6 +27,7 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
+import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.safety.Severity
 import dev.argus.engine.safety.ValidationIssue
 import dev.argus.automation.vm.CURRENT_CONTACT_PLACEHOLDER
@@ -63,6 +65,30 @@ object BudgetMeta {
             "non può essere applicato. Scegli un modello con prezzo noto o rimuovi il limite in dollari.",
     )
 }
+
+/**
+ * Un [Brain] che sa chiamare un provider preciso. [MeteredBrain] ammette una chiamata per la
+ * [ProviderConfig] letta in quel momento e la esegue proprio su quella: se l'utente cambia provider fra
+ * ammissione e chiamata, la richiesta non va a un provider che il budget non ha controllato.
+ */
+interface ProviderBoundBrain : Brain {
+    fun boundTo(config: ProviderConfig): Brain
+}
+
+/** metaError dell'evento d'uso di una chiamata partita e poi cancellata (timeout della lane, regola spenta). */
+private const val CANCELLED_META = "cancelled"
+
+/** Gli avvisi più vecchi della finestra più lunga (un mese) non servono più alla deduplica. */
+private const val ALERT_KEY_MAX_AGE_MILLIS = 32L * 24 * 60 * 60 * 1_000
+
+/** Stima grezza dei token quando il provider non li riporta: circa 4 caratteri per token. */
+private const val CHARS_PER_TOKEN = 4L
+
+/** Parte fissa del prompt di compile (regole, schema delle bozze, manifest): circa 33 000 caratteri. */
+private const val COMPILE_PROMPT_TOKENS_ESTIMATE = 9_000L
+
+/** Parte fissa del prompt di una chiamata generativa (regole sui dati non fidati). */
+private const val ACT_PROMPT_TOKENS_ESTIMATE = 500L
 
 private const val NOTE_MAX_CHARS = 400
 private const val NOTE_PREFIX = "(Argus: your previous reply could not be used: "
@@ -154,14 +180,25 @@ class MeteredBrain(
     private val alerts: BudgetAlerts,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val zone: () -> ZoneId = ZoneId::systemDefault,
-    /** Tetti utente: serve a contare le chiamate in volo. Senza, vale solo il verdetto di [policy]. */
-    settings: BudgetSettingsStore? = null,
+    /**
+     * Tetti utente: serve a contare le chiamate in volo e ad azzerare gli avvisi già dati quando
+     * l'utente cambia i limiti. Senza, vale solo il verdetto di [policy].
+     */
+    private val settings: BudgetSettingsStore? = null,
     /** Se presente, abilita il giro di riparazione sugli errori del validatore (0.5.0). */
     private val draftErrors: DraftErrorSource? = null,
     /** Notifica ogni ritentativo che parte (formato o riparazione): per il banco e per i test. */
     private val onRetry: ((CompileRetryKind) -> Unit)? = null,
 ) : Brain {
-    private val notified = ConcurrentHashMap<String, Boolean>()
+    /**
+     * Avvisi già dati: chiave (limite + finestra) → istante dell'avviso. Si azzera quando cambiano i
+     * limiti (un tetto alzato e di nuovo raggiunto va segnalato) e perde le finestre ormai chiuse.
+     */
+    private val notified = ConcurrentHashMap<String, Long>()
+
+    /** Limiti in vigore all'ultimo avviso: un cambio azzera [notified]. */
+    @Volatile
+    private var alertSettings: BudgetSettings? = settings?.observe()?.value
 
     /**
      * Sezione critica corta: check + prenotazione, e registrazione + rilascio. Senza questo gate due
@@ -184,7 +221,7 @@ class MeteredBrain(
         state: DeviceState,
     ): CompileResult {
         val config = selectedConfig()
-        val first = meteredCompile(config) { delegate.compile(nl, manifest, state) }
+        val first = meteredCompile(config, nl) { it.compile(nl, manifest, state) }
         // Retry-once degli errori di FORMATO del modello (draft_invalid, meta_parse_error,
         // meta_json_missing) e di una risposta senza la riga @@META@@ (draft_missing: il protocollo la
         // chiede sempre, anche per un chiarimento), provider-agnostico ma VISIBILE al choke-point: il primo
@@ -199,8 +236,8 @@ class MeteredBrain(
         // porta in coda al testo utente una nota di correzione, SOLO per questa chiamata (non entra in
         // chat né nel DB: il chiamante conserva il proprio `nl`).
         val retryText = withCorrectionNote(nl, code, first.detail)
-        return meteredCompile(config, { onRetry?.invoke(CompileRetryKind.FORMAT) }) {
-            delegate.compile(retryText, manifest, state)
+        return meteredCompile(config, retryText, { onRetry?.invoke(CompileRetryKind.FORMAT) }) {
+            it.compile(retryText, manifest, state)
         }
     }
 
@@ -223,6 +260,10 @@ class MeteredBrain(
         val draft = first.draft ?: return first
         // In modifica il contatto è ancora il segnaposto: la chat lo ripristina DOPO, il validatore qui no.
         if ((draft.trigger as? Trigger.Notification)?.conversationId == CURRENT_CONTACT_PLACEHOLDER) return first
+        // 0.8: lo stesso per il contatto del trigger di fine di una regola-intervallo.
+        if ((draft.exit?.trigger as? Trigger.Notification)?.conversationId ==
+            dev.argus.automation.vm.CURRENT_EXIT_CONTACT_PLACEHOLDER
+        ) return first
         val errors = try {
             source.errors(draft).filter { it.severity == Severity.ERROR }
         } catch (error: CancellationException) {
@@ -235,8 +276,8 @@ class MeteredBrain(
         val text = nl + "\n\n" + repairNote(errors)
         if (text.length > CompileLimits.MAX_MESSAGE_CHARS) return first
         val repaired = try {
-            meteredCompile(config, { onRetry?.invoke(CompileRetryKind.REPAIR) }) {
-                delegate.compile(text, manifest, state)
+            meteredCompile(config, text, { onRetry?.invoke(CompileRetryKind.REPAIR) }) {
+                it.compile(text, manifest, state)
             }
         } catch (error: CancellationException) {
             throw error
@@ -266,9 +307,11 @@ class MeteredBrain(
 
     private suspend fun meteredCompile(
         config: ProviderConfig,
+        /** Testo utente della chiamata: serve solo alla stima dei token quando il provider non li riporta. */
+        userText: String,
         /** Chiamata solo se il budget ammette la chiamata (un blocco HARD non conta come ritentativo partito). */
         onAdmitted: (() -> Unit)? = null,
-        call: suspend () -> CompileResult,
+        call: suspend (Brain) -> CompileResult,
     ): CompileResult {
         val now = nowMillis()
         when (val admission = admit(config, UsageEventKind.COMPILE, now)) {
@@ -294,7 +337,11 @@ class MeteredBrain(
             Admission.Granted -> onAdmitted?.invoke()
         }
         // Ogni tentativo costa ed entra nel budget, anche quando il JSON del modello è malformato.
-        return metered(config, UsageEventKind.COMPILE, now, call, { it.metaError }, { it.usage })
+        return metered(
+            config, UsageEventKind.COMPILE, now, call, { it.metaError }, { it.usage },
+            requestChars = userText.length.toLong(),
+            responseCharsOf = { (it.raw ?: it.reply).length.toLong() },
+        )
     }
 
     override suspend fun act(
@@ -302,8 +349,8 @@ class MeteredBrain(
         goal: String,
         contextSources: List<String>,
         allowedTools: List<String>,
-    ): ActResult = meteredAct(UsageEventKind.ACT, context) {
-        delegate.act(context, goal, contextSources, allowedTools)
+    ): ActResult = meteredAct(UsageEventKind.ACT, context, goal.length.toLong()) {
+        it.act(context, goal, contextSources, allowedTools)
     }
 
     /**
@@ -317,17 +364,43 @@ class MeteredBrain(
         contextSources: List<String>,
         allowedTools: List<String>,
         runtimeData: List<RuntimeDataBinding>,
-    ): ActResult = meteredAct(UsageEventKind.ACT, context) {
-        delegate.actResolved(context, goal, contextSources, allowedTools, runtimeData)
+    ): ActResult = meteredAct(
+        UsageEventKind.ACT,
+        context,
+        goal.length.toLong() + runtimeData.sumOf { it.value.text.length.toLong() },
+    ) {
+        it.actResolved(context, goal, contextSources, allowedTools, runtimeData)
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
-        meteredAct(UsageEventKind.ACT_V2, context) { delegate.actV2(context, action) }
+        meteredAct(
+            UsageEventKind.ACT_V2,
+            context,
+            action.goal.length.toLong() + context.state.queryValues.values.sumOf { it.length.toLong() },
+        ) { it.actV2(context, action) }
+
+    /** 0.8: la risposta vincolata passa dallo stesso budget di [actResolved]; ogni tentativo conta. */
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult = meteredAct(
+        UsageEventKind.ACT,
+        context,
+        goal.length.toLong() + runtimeData.sumOf { it.value.text.length.toLong() },
+    ) {
+        it.actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
+    }
 
     private suspend fun meteredAct(
         kind: UsageEventKind,
         context: FireContext,
-        call: suspend () -> ActResult,
+        /** Caratteri della richiesta noti qui (obiettivo e dati): l'evento si aggiunge sotto. */
+        requestChars: Long,
+        call: suspend (Brain) -> ActResult,
     ): ActResult {
         val config = selectedConfig()
         val now = nowMillis()
@@ -339,8 +412,44 @@ class MeteredBrain(
             }
             Admission.Granted -> Unit
         }
-        return metered(config, kind, now, call, { it.metaError }, { it.usage })
+        return metered(
+            config, kind, now, call, { it.metaError }, { it.usage },
+            requestChars = requestChars + eventChars(context.event),
+            responseCharsOf = { it.text?.length?.toLong() ?: 0L },
+        )
     }
+
+    /** Testo dell'evento che il transport mette nel prompt (messaggio, mittente, SMS). */
+    private fun eventChars(event: TriggerEvent): Long = when (event) {
+        is TriggerEvent.NotificationPosted ->
+            listOfNotNull(event.text, event.title, event.sender).sumOf { it.length.toLong() }
+        is TriggerEvent.PhoneStateChanged -> event.smsText?.length?.toLong() ?: 0L
+        else -> 0L
+    }
+
+    /**
+     * Stima dei token quando il provider non riporta l'uso (S10): senza, un tetto in token non
+     * scatterebbe mai. Circa 4 caratteri per token sul testo noto qui, più la parte fissa del prompt
+     * di sistema che il transport aggiunge (regole e schema per la compile). Nessuna risposta del
+     * modello (errore di rete, rifiuto) = nessuna stima: la chiamata resta con token n/d.
+     */
+    private fun estimatedUsage(kind: UsageEventKind, requestChars: Long, responseChars: Long): TurnUsage? {
+        if (responseChars <= 0L) return null
+        val promptOverhead = when (kind) {
+            UsageEventKind.COMPILE -> COMPILE_PROMPT_TOKENS_ESTIMATE
+            UsageEventKind.ACT, UsageEventKind.ACT_V2 -> ACT_PROMPT_TOKENS_ESTIMATE
+        }
+        return TurnUsage(
+            inputTokens = promptOverhead + charsToTokens(requestChars),
+            outputTokens = charsToTokens(responseChars),
+        )
+    }
+
+    private fun charsToTokens(chars: Long): Long = (chars.coerceAtLeast(0L) + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
+
+    /** Il brain da chiamare per [config]: lo stesso provider che il budget ha appena ammesso. */
+    private fun brainFor(config: ProviderConfig): Brain =
+        (delegate as? ProviderBoundBrain)?.boundTo(config) ?: delegate
 
     private sealed interface Admission {
         data object Granted : Admission
@@ -401,26 +510,51 @@ class MeteredBrain(
 
     /**
      * Esegue la chiamata di rete FUORI dal lock; poi, sotto lock, registra l'usage e libera la
-     * prenotazione. Il rilascio è garantito anche su eccezione o cancellazione (la cancellazione non
-     * registra alcun evento, come prima).
+     * prenotazione. Il rilascio è garantito anche su eccezione o cancellazione. Una chiamata
+     * cancellata dopo la partenza (timeout della lane, regola spenta) registra un evento ERROR senza
+     * token: la richiesta è già dal provider e i tetti chiamate devono vederla (S10).
      */
     private suspend fun <R> metered(
         config: ProviderConfig,
         kind: UsageEventKind,
         now: Long,
-        call: suspend () -> R,
+        call: suspend (Brain) -> R,
         metaErrorOf: (R) -> String?,
         usageOf: (R) -> TurnUsage?,
+        requestChars: Long,
+        responseCharsOf: (R) -> Long,
     ): R {
         var released = false
         try {
-            val result = call()
+            // Il provider chiamato è quello appena ammesso, non quello selezionato fra un istante.
+            val result = call(brainFor(config))
             callGate.withLock {
-                recordUsage(config, kind, now, metaErrorOf(result), usageOf(result))
+                val reported = usageOf(result)
+                val estimate = if (reported == null) {
+                    estimatedUsage(kind, requestChars, responseCharsOf(result))
+                } else {
+                    null
+                }
+                recordUsage(
+                    config, kind, now, metaErrorOf(result),
+                    usage = reported ?: estimate,
+                    estimated = estimate != null,
+                )
                 release(config)
                 released = true
             }
             return result
+        } catch (error: CancellationException) {
+            if (!released) {
+                withContext(NonCancellable) {
+                    callGate.withLock {
+                        recordUsage(config, kind, now, CANCELLED_META, usage = null, estimated = false)
+                        release(config)
+                        released = true
+                    }
+                }
+            }
+            throw error
         } finally {
             if (!released) {
                 withContext(NonCancellable) { callGate.withLock { release(config) } }
@@ -481,6 +615,8 @@ class MeteredBrain(
         now: Long,
         metaError: String?,
         usage: TurnUsage?,
+        /** [usage] è una stima dalle lunghezze (il provider non ha riportato l'uso): niente costo. */
+        estimated: Boolean,
     ) {
         val model = usage?.model ?: config.model ?: BudgetMeta.UNKNOWN_MODEL
         // Alcuni provider restituiscono un alias/versione datata del modello configurato. Se
@@ -490,8 +626,9 @@ class MeteredBrain(
         val pricingModel = sequenceOf(usage?.model, config.model)
             .filterNotNull()
             .firstOrNull(prices::containsKey)
-        // Il prezzo è quello valido all'istante dell'evento (listini con data di validità).
-        val cost = CostEstimator.estimate(config.providerId, pricingModel, usage, now)
+        // Il prezzo è quello valido all'istante dell'evento (listini con data di validità). Un uso
+        // stimato non diventa mai una cifra in dollari.
+        val cost = if (estimated) null else CostEstimator.estimate(config.providerId, pricingModel, usage, now)
         tryInsert(
             UsageEventEntity(
                 timestampMs = now,
@@ -510,7 +647,12 @@ class MeteredBrain(
                 tokensIn = usage?.inputTokens,
                 tokensOut = usage?.outputTokens,
                 costMicros = cost,
-                pricingVersion = if (cost != null) ProviderCatalog.PRICING_VERSION else null,
+                // Una stima dei token è marcata qui, così il budget la mostra come tale (≈).
+                pricingVersion = when {
+                    cost != null -> ProviderCatalog.PRICING_VERSION
+                    estimated -> UsageEventEntity.TOKEN_ESTIMATE
+                    else -> null
+                },
                 reasoningTokens = usage?.reasoningTokens,
                 finishReason = usage?.finishReason,
             ),
@@ -554,10 +696,27 @@ class MeteredBrain(
         }
     }
 
+    /**
+     * Prima di ogni avviso: limiti cambiati ⇒ si riparte da zero; poi via le voci più vecchie della
+     * finestra più lunga (il mese), così la mappa non cresce per tutta la vita del processo.
+     */
+    private fun refreshAlertKeys(now: Long) {
+        val current = settings?.observe()?.value
+        if (current != alertSettings) {
+            alertSettings = current
+            notified.clear()
+        }
+        notified.entries.removeIf { (_, at) -> now - at > ALERT_KEY_MAX_AGE_MILLIS || at > now }
+    }
+
+    /** Numero di avvisi ricordati: solo per i test. */
+    internal fun rememberedAlertCount(): Int = notified.size
+
     /** One-shot per finestra: chiave = auditDetail + bucket (ora/giorno/mese locale). */
     private suspend fun notifyOnce(tripped: TrippedLimit, now: Long) {
+        refreshAlertKeys(now)
         val key = bucketKey(tripped, now)
-        if (notified.putIfAbsent(key, true) == null) {
+        if (notified.putIfAbsent(key, now) == null) {
             try {
                 // Titolo/testo dell'alert bilingui via RenderLanguage (EN default, IT se locale it).
                 val l = RenderLanguage.system()
@@ -579,7 +738,9 @@ class MeteredBrain(
     }
 
     private suspend fun notifyUnpricedOnce(providerId: ProviderId) {
-        if (notified.putIfAbsent("unpriced_model:${providerId.wireName}", true) != null) return
+        val now = nowMillis()
+        refreshAlertKeys(now)
+        if (notified.putIfAbsent("unpriced_model:${providerId.wireName}", now) != null) return
         try {
             val l = RenderLanguage.system()
             alerts.notify(

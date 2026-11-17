@@ -10,8 +10,26 @@
     <string name="argus_connectivity_notification_text">Running armed automations and monitoring required triggers</string>
     <string name="argus_budget_channel_name">LLM budget</string>
     <string name="argus_budget_channel_description">Alerts when the LLM call budget is almost or fully exhausted</string>
+    <!-- 0.7.2: avvisi di salute delle regole. Solo nomi di regola e conteggi, mai contenuti. -->
+    <string name="argus_health_channel_name">Rule health</string>
+    <string name="argus_health_channel_description">Alerts when a rule keeps failing or loses something it needs to work</string>
+    <string name="argus_health_rule_failed_title">Rule “%1$s” failed %2$d times in a row</string>
+    <string name="argus_health_rule_failed_text">Tap to see what went wrong.</string>
+    <string name="argus_health_lost_privileged">Shizuku, Sui or root is not available</string>
+    <string name="argus_health_lost_notification_listener">Notification access was turned off</string>
+    <string name="argus_health_lost_accessibility">The Argus Accessibility service is off</string>
+    <string name="argus_health_lost_exact_alarms">Exact alarms are no longer allowed</string>
+    <string name="argus_health_lost_location">The location permission was removed</string>
+    <plurals name="argus_health_capability_rules">
+        <item quantity="one">%d armed rule needs it. Fix it in System.</item>
+        <item quantity="other">%d armed rules need it. Fix it in System.</item>
+    </plurals>
+    <string name="argus_health_fix">Fix</string>
     <string name="argus_foreground_denied_title">Rules paused</string>
     <string name="argus_foreground_denied_text">Background rules (Wi-Fi, power, screen, battery, audio, modes) paused: open Argus to turn them back on</string>
+    <!-- 0.7.2: backup automatico delle regole, dopo 3 fallimenti di fila. -->
+    <string name="auto_backup_failed_title">Automatic backup failed</string>
+    <string name="auto_backup_failed_text">The last 3 automatic backups of your rules failed. Open Argus › System to see why.</string>
     <!-- 0.4.1 (azioni): aperture dal background trasformate in una notifica «Tocca per aprire». -->
     <string name="act41_open_tap_title">Tap to open %1$s</string>
     <string name="act41_open_tap_text">Android does not let Argus open it by itself from the background.</string>
@@ -24,6 +42,7 @@
     <string name="act41_open_dest_date">date and time settings</string>
     <string name="act41_open_dest_app_details">%1$s app settings</string>
     <string name="act41_open_dest_settings">Settings</string>
+    <string name="tel08_call_tap_title">Tap to call %1$s</string>
     <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
     <string name="a11y51_service_label">Argus (screen macros)</string>
     <string name="a11y51_service_description">Lets Argus run the screen macros you approved: it taps, types and scrolls in the app you choose, one step at a time. It reads nothing and records nothing when no macro is running.</string>
@@ -32,4 +51,12 @@
     <string name="a11y51_notification_title">Argus is using the screen</string>
     <string name="a11y51_notification_text">An approved macro is tapping and typing in an app. Tap Stop to end it now.</string>
     <string name="a11y51_notification_stop">Stop</string>
+    <!-- 0.8: «chiedimi prima di eseguire» (confirm) e domande con pulsanti (ask). -->
+    <string name="prompt08_channel_name">Questions and confirmations</string>
+    <string name="prompt08_channel_description">A rule asks before running, or asks you to choose</string>
+    <string name="prompt08_confirm_title">Run “%1$s”?</string>
+    <string name="prompt08_confirm_text">The rule fired and is waiting for you. Without an answer it does not run.</string>
+    <string name="prompt08_run">Run</string>
+    <string name="prompt08_cancel">Cancel</string>
+    <string name="prompt08_public_title">Argus is waiting for your answer</string>
 </resources>

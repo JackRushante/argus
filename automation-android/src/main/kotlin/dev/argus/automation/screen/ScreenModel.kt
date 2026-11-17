@@ -12,6 +12,9 @@ interface ScreenNode {
 
     /** `viewIdResourceName` (es. `com.example:id/send`). */
     val viewId: String?
+
+    /** Package dell'app a cui appartiene il nodo, o null se non si legge (allora non si tocca). */
+    val packageName: String?
     val isClickable: Boolean
     val isEditable: Boolean
     val isScrollable: Boolean
@@ -65,6 +68,7 @@ internal object ScreenCodes {
     const val SERVICE_UNAVAILABLE = "ui_service_unavailable"
     const val BUSY = "ui_busy"
     const val FORBIDDEN_SCREEN = "ui_forbidden_screen"
+    const val WRONG_APP = "ui_wrong_app"
     const val OPEN_FAILED = "ui_open_failed"
     const val ELEMENT_NOT_FOUND = "ui_element_not_found"
     const val CHECK_FAILED = "ui_check_failed"

@@ -35,6 +35,15 @@ enum class ModeKind {
 /** Riproduzione multimediale (uso MEDIA): in corso o terminata (0.4.1). */
 enum class MediaPlayState { PLAYING, STOPPED }
 
+/** 0.8 scaffold: il momento dell'evento di calendario a cui si aggancia [Trigger.CalendarEvent]. */
+@Serializable(with = CalendarPhaseSerializer::class)
+enum class CalendarPhase { START, END }
+
+object CalendarPhaseSerializer : CaseInsensitiveEnumSerializer<CalendarPhase>(
+    "dev.argus.engine.model.CalendarPhase",
+    CalendarPhase.entries.toTypedArray(),
+)
+
 /** Limiti del trigger `battery` (0.4.1): la soglia è un livello percentuale intero. */
 object BatteryTriggerPolicy {
     const val MIN_THRESHOLD = 1
@@ -57,6 +66,12 @@ enum class SensorKind(val wireName: String) {
     @SerialName("motion_detect") MOTION_DETECT("motion_detect"),
     @SerialName("step_detector") STEP_DETECTOR("step_detector"),
     @SerialName("step_counter") STEP_COUNTER("step_counter"),
+
+    /** 0.8 scaffold ([FeatureGate.TRIGGER_SENSOR_SHAKE]): il telefono viene scosso (dall'accelerometro). */
+    @SerialName("shake") SHAKE("shake"),
+
+    /** 0.8 scaffold ([FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN]): il telefono viene girato a faccia in giù. */
+    @SerialName("flip_face_down") FLIP_FACE_DOWN("flip_face_down"),
 }
 
 object SensorTriggerPolicy {
@@ -72,6 +87,10 @@ object SensorTriggerPolicy {
         SensorKind.STEP_DETECTOR,
         SensorKind.STEP_COUNTER,
         -> minimumEventCount in 1..MAX_EVENT_COUNT
+        // 0.8 scaffold: gesti one-shot, come i sensori motion.
+        SensorKind.SHAKE,
+        SensorKind.FLIP_FACE_DOWN,
+        -> minimumEventCount == 1
     }
 }
 
@@ -201,6 +220,57 @@ sealed interface Trigger {
      */
     @Serializable @SerialName("app_event")
     data class AppEvent(val pkg: String, val event: AppEventKind) : Trigger
+
+    // ---------------------------------------------------------------------------------------------
+    // 0.8 scaffold: trigger SPENTI finché il loro [FeatureGate] è off (il validator li rifiuta con
+    // `not_available_yet`). La decisione su chi può avviare la shell è già presa in StaticShellSafety.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Inizio ([CalendarPhase.START]) o fine ([CalendarPhase.END]) di un evento del calendario del
+     * telefono ([FeatureGate.TRIGGER_CALENDAR_EVENT]), spostato di [offsetMinutes] (negativo = prima).
+     * [titleMatch] filtra sul titolo (contiene, senza maiuscole), [calendar] sul nome del calendario;
+     * null = qualunque. Gli inviti arrivano da altri: non può avviare la shell.
+     */
+    @Serializable @SerialName("calendar_event")
+    data class CalendarEvent(
+        val phase: CalendarPhase,
+        val offsetMinutes: Int = 0,
+        val titleMatch: String? = null,
+        val calendar: String? = null,
+    ) : Trigger
+
+    /**
+     * Un tag NFC avvicinato al telefono ([FeatureGate.TRIGGER_NFC_TAG]). [tagId] è l'identificativo del
+     * tag; con [resolveTag] l'app legge il tag quando la regola viene armata (come
+     * `resolveCurrentLocation` per un geofence) e il valore non passa mai dal modello.
+     */
+    @Serializable @SerialName("nfc_tag")
+    data class NfcTag(
+        val tagId: String = "",
+        val resolveTag: Boolean = false,
+    ) : Trigger
+
+    /**
+     * [offsetMinutes] minuti prima della prossima sveglia del telefono ([FeatureGate.TRIGGER_NEXT_ALARM]);
+     * 0 = all'ora della sveglia.
+     */
+    @Serializable @SerialName("next_alarm")
+    data class NextAlarm(val offsetMinutes: Int = 0) : Trigger
+
+    /**
+     * Il tempo in primo piano di oggi dell'app [pkg] supera [minutes] minuti ([FeatureGate.TRIGGER_APP_USAGE]).
+     * Scatta al più una volta al giorno.
+     */
+    @Serializable @SerialName("app_usage")
+    data class AppUsage(val pkg: String, val minutes: Int) : Trigger
+
+    /**
+     * La modalità utente cambia ([FeatureGate.TRIGGER_USER_MODE_CHANGED]); [to] null = qualunque cambio.
+     * Una modalità può cambiarla una regola scattata da un evento esterno: non può avviare la shell.
+     */
+    @Serializable @SerialName("user_mode_changed")
+    data class UserModeChanged(val to: String? = null) : Trigger
 }
 
 /** One-shot = fira una volta e si auto-consuma: `at` assoluto o `afterMs` relativo (mai cron ricorrente). */

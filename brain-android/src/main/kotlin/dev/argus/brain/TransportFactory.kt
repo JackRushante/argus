@@ -56,14 +56,20 @@ class DefaultTransportFactory(
      *
      * Il cleartext (#19): solo il Custom ammette `http://` verso la rete locale ([CleartextGuard.LOCAL_NETWORK]);
      * gli altri provider tengono la guardia del client di base (solo loopback, come la piattaforma prima).
+     *
+     * Niente ritentativo automatico di OkHttp verso i provider: le loro POST sono a pagamento e non
+     * idempotenti, e una richiesta già arrivata al server ripartirebbe su una connessione nuova (doppia
+     * fattura). Il bridge Hermes lo tiene: ogni sua richiesta porta una chiave di idempotenza.
      */
     internal fun clientFor(config: ProviderConfig): OkHttpClient {
         val needed = CompileTimeoutPolicy.timeoutMillis(config) + CompileTimeoutPolicy.HTTP_MARGIN_MILLIS
         val call = client.callTimeoutMillis
         val longer = call != 0 && needed > call
         val custom = config.providerId == ProviderId.CUSTOM_OPENAI_COMPAT
-        if (!longer && !custom) return client
+        val noRetry = config.providerId != ProviderId.HERMES && client.retryOnConnectionFailure
+        if (!longer && !custom && !noRetry) return client
         val builder = client.newBuilder()
+        if (noRetry) builder.retryOnConnectionFailure(false)
         if (longer) {
             builder
                 .callTimeout(needed, TimeUnit.MILLISECONDS)

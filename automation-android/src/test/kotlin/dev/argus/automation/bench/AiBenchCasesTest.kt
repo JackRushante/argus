@@ -107,6 +107,14 @@ class AiBenchCasesTest {
             "app event" to triggers { type(it) == "app_event" },
             // 0.4.1: alba e tramonto, come variante del trigger time.
             "time solar" to triggers { type(it) == "time" && it["solar"] != null && !it["solar"].isAbsentMatcher() },
+            // 0.8: trigger nuovi, la permanenza in un luogo e i gesti.
+            "calendar event" to triggers { type(it) == "calendar_event" },
+            "nfc tag" to triggers { type(it) == "nfc_tag" },
+            "next alarm" to triggers { type(it) == "next_alarm" },
+            "app usage" to triggers { type(it) == "app_usage" },
+            "user mode changed" to triggers { type(it) == "user_mode_changed" },
+            "geofence dwell" to triggers { type(it) == "geofence" && text(it, "transition") == "DWELL" },
+            "gesture" to triggers { type(it) == "sensor" && text(it, "kind").let { kind -> kind == "shake" || kind == "flip_face_down" } },
         )
         required.forEach { (name, found) -> assertTrue(found >= 2, "trigger '$name' coperto $found volte, ne servono 2") }
         val contactCases = cases.count { it.draft.contact != null }
@@ -119,6 +127,17 @@ class AiBenchCasesTest {
         assertTrue(conditions.count { it == "time_window" } >= 2, "condizioni di fascia oraria")
         assertTrue(conditions.count { it == "app_in_foreground" } >= 2, "condizioni di app in primo piano")
         assertTrue(conditions.count { it == "state_equals" || it == "state_compare" } >= 2, "condizioni di stato")
+        // 0.8: ogni condizione nuova compare almeno in un caso.
+        listOf(
+            "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
+            "stored_compare", "user_mode_is",
+        ).forEach { type -> assertTrue(type in conditions, "condizione '$type' mai coperta") }
+        // 0.8: conferma prima di eseguire, risposta vincolata dell'AI, cattura HTTP e segreti della cassaforte.
+        assertTrue(cases.count { it.draft.confirm != null } >= 2, "regole con conferma")
+        fun paramCases(prefix: String) = cases.count { c -> c.draft.params.keys.any { it.startsWith(prefix) } }
+        assertTrue(paramCases("invoke_llm.output") >= 2, "risposte dell'AI vincolate")
+        assertTrue(paramCases("http_request.captureAs") >= 2, "risposte HTTP catturate")
+        assertTrue(paramCases("http_request.secretHeaders") >= 2, "segreti della cassaforte")
     }
 
     @Test
@@ -130,7 +149,7 @@ class AiBenchCasesTest {
                 case.covers.filter { it in BenchVocab.ACTION_TYPES }
             entries.toSet().forEach { covered[it] = (covered[it] ?: 0) + 1 }
         }
-        val thin = BenchVocab.ACTION_TYPES.filter { (covered[it] ?: 0) < 2 }
+        val thin = (BenchVocab.ACTION_TYPES - BenchVocab.NOT_YET_AVAILABLE_ACTION_TYPES).filter { (covered[it] ?: 0) < 2 }
         assertTrue(thin.isEmpty(), "azioni coperte meno di 2 volte: ${thin.map { it to (covered[it] ?: 0) }}")
         // invoke_llm con e senza web, invoke_llm_v2 con stato.
         val withWeb = cases.count { c -> c.draft.params.any { (k, v) -> k == "invoke_llm.allowedTools" && v.toString().contains("web.search") } }
@@ -485,6 +504,8 @@ class AiBenchCasesTest {
                 else -> null
             }
             "sensor" -> str("kind")?.let { "sensor.$it" }
+            // 0.8: wire name e capability coincidono.
+            "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed" -> str("type")
             else -> null
         }
     }

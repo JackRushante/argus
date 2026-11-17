@@ -8,6 +8,7 @@ import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfirmSpec
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.Transition
@@ -251,6 +252,25 @@ class AiBenchEvaluatorTest {
             setOf(FailureCategory.MISSING_FLOW, FailureCategory.MISSING_VARS),
             flat.failures.map { it.category }.toSet(),
         )
+    }
+
+    @Test
+    fun `a rule that must ask first is checked on its confirm`() {
+        val case = caseOf(
+            """{"id":"e.confirm","category":"c","lang":"it","text":"Ogni sera alle 23 spegni il Wi-Fi, ma chiedimi prima",
+               "expect":{"outcome":"draft","trigger":{"type":"time"},"actions_include":["set_wifi"],
+                         "confirm":{"present":true}}}""",
+        )
+        val nightly = draft(Trigger.Time(cron = "0 23 * * *", tz = ZONE), Action.SetWifi(false))
+        assertTrue(eval(case, nightly.copy(confirm = ConfirmSpec(timeoutMs = 600_000))).passed)
+        assertEquals(listOf(FailureCategory.WRONG_TRIGGER), eval(case, nightly).failures.map { it.category })
+        // Senza attesa sulla conferma, una bozza con o senza conferma passa allo stesso modo.
+        val free = caseOf(
+            """{"id":"e.noconfirm","category":"c","lang":"it","text":"Ogni sera alle 23 spegni il Wi-Fi",
+               "expect":{"outcome":"draft","trigger":{"type":"time"},"actions_include":["set_wifi"]}}""",
+        )
+        assertTrue(eval(free, nightly).passed)
+        assertTrue(eval(free, nightly.copy(confirm = ConfirmSpec())).passed)
     }
 
     @Test

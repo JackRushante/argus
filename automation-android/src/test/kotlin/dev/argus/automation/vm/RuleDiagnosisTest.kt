@@ -464,6 +464,27 @@ class RuleDiagnosisTest {
     }
 
     @Test
+    fun `a last run whose actions failed is a warning with the log text, not ok`() {
+        val rule = immediateRule()
+        val failed = record(AuditKind.FIRED, now - 600_000, status = ExecutionStatus.FAILED)
+            .copy(succeededCount = 0, failedCount = 1)
+        val partial = record(AuditKind.FIRED, now - 600_000, status = ExecutionStatus.PARTIAL)
+            .copy(succeededCount = 1, failedCount = 1)
+
+        assertEquals(
+            DiagnosisRow(DiagnosisLevel.WARN, "Ultimo scatto 10 min fa: esecuzione fallita · 1/1 azioni fallite"),
+            diagnose(rule, log = listOf(failed)).rows.last(),
+        )
+        assertEquals(
+            DiagnosisRow(DiagnosisLevel.WARN, "Last run 10 min ago: 1/2 actions succeeded · 1 failed"),
+            diagnose(rule, log = listOf(partial), language = RenderLanguage.EN).rows.last(),
+        )
+        // In coda o riuscita resta OK.
+        val queued = record(AuditKind.FIRED, now - 600_000, status = ExecutionStatus.SUBMITTED)
+        assertEquals(ok("Ultimo scatto: 10 min fa"), diagnose(rule, log = listOf(queued)).rows.last())
+    }
+
+    @Test
     fun `lifecycle and duplicate events are not attempts and a rule that never ran says so`() {
         val rule = immediateRule()
         val noise = listOf(

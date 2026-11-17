@@ -57,4 +57,14 @@ class PauseLogTextTest {
         assertNotEquals(en, italian)
         assertTrue(en.isNotBlank() && italian.isNotBlank())
     }
+
+    @Test
+    fun `a fire skipped by a paused group reads like the global pause, without the label name`() {
+        val record = pausedRecord(detail = PauseCodes.GROUP_PAUSED)
+        assertEquals("skipped: its label group is paused", record.toLogRow(emptyList(), RenderLanguage.EN).summary)
+        assertEquals("saltata: gruppo in pausa", record.toLogRow(emptyList(), RenderLanguage.IT).summary)
+        assertEquals(LogOutcome.PARTIAL, record.toLogRow(emptyList(), RenderLanguage.EN).outcome)
+        val en = assertNotNull(LogReasonLabels.label(PauseCodes.GROUP_PAUSED, RenderLanguage.EN))
+        assertNotEquals(en, assertNotNull(LogReasonLabels.label(PauseCodes.GROUP_PAUSED, RenderLanguage.IT)))
+    }
 }

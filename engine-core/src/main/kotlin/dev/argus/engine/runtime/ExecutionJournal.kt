@@ -175,6 +175,15 @@ internal fun Action.journalType(): String = when (this) {
     is Action.Screenshot -> ActionTypeIds.SCREENSHOT
     is Action.AppPermission -> ActionTypeIds.APP_PERMISSION
     is Action.UiSteps -> ActionTypeIds.UI_STEPS
+    is Action.Ask -> ActionTypeIds.ASK
+    is Action.SetStored -> ActionTypeIds.SET_STORED
+    is Action.SetUserMode -> ActionTypeIds.SET_USER_MODE
+    is Action.NotificationReply -> ActionTypeIds.NOTIFICATION_REPLY
+    is Action.NotificationAction -> ActionTypeIds.NOTIFICATION_ACTION
+    is Action.SendSms -> ActionTypeIds.SEND_SMS
+    is Action.CallNumber -> ActionTypeIds.CALL_NUMBER
+    is Action.SendIntent -> ActionTypeIds.SEND_INTENT
+    is Action.ScreenCall -> ActionTypeIds.SCREEN_CALL
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2

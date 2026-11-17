@@ -1,0 +1,439 @@
+[
+ {
+  "id": "M01-mode-changed-notify",
+  "title": "Modalità: il passaggio a «E2E Casa» fa scattare la regola e salva un valore",
+  "cond": "none",
+  "rule": {
+   "name": "M01-mode-changed-notify",
+   "trigger": {
+    "type": "user_mode_changed",
+    "to": "E2E Casa"
+   },
+   "actions": [
+    {
+     "type": "set_stored",
+     "key": "e2e_m01",
+     "op": "SET",
+     "value": "{{RUN}}"
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e M01 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {
+    "to": "e2e casa"
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e M01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "M02-mode-changed-true-audio_mode+display+launch",
+  "title": "Copertura a coppie: user_mode_changed / condizione true / audio_mode, display, launch",
+  "cond": "true",
+  "rule": {
+   "name": "M02-mode-changed-true-audio_mode+display+launch",
+   "trigger": {
+    "type": "user_mode_changed"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e M02",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7",
+   "settings put system accelerometer_rotation 1"
+  ]
+ },
+ {
+  "id": "M03-mode-changed-false-network_out+radios+device_control",
+  "title": "Copertura a coppie: user_mode_changed / condizione false / network_out, radios, device_control",
+  "cond": "false",
+  "rule": {
+   "name": "M03-mode-changed-false-network_out+radios+device_control",
+   "trigger": {
+    "type": "user_mode_changed",
+    "to": "E2E Lavoro"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "lock_screen"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {
+    "to": "E2E Lavoro"
+   }
+  },
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "M04-shell-from-mode-change-refused",
+  "title": "Shell: non parte da un cambio di modalità",
+  "cond": "none",
+  "rule": {
+   "name": "M04-shell-from-mode-change-refused",
+   "trigger": {
+    "type": "user_mode_changed",
+    "to": "E2E Casa"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "echo e2e"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "M05-ui-steps-from-mode-change-refused",
+  "title": "ui_steps: una macro sullo schermo non parte da un cambio di modalità",
+  "cond": "none",
+  "rule": {
+   "name": "M05-ui-steps-from-mode-change-refused",
+   "trigger": {
+    "type": "user_mode_changed"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ui_steps_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "M06-stored-set-then-compare",
+  "title": "Valori conservati: un valore scritto si rilegge subito in un «se»",
+  "cond": "none",
+  "rule": {
+   "name": "M06-stored-set-then-compare",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_stored",
+     "key": "e2e_m06",
+     "op": "SET",
+     "value": "{{RUN}}"
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "stored_compare",
+      "key": "e2e_m06",
+      "valueType": "TEXT",
+      "op": "EQ",
+      "expected": "{{RUN}}"
+     },
+     "then": [
+      {
+       "type": "show_notification",
+       "title": "e2e M06 {{RUN}}",
+       "text": "e2e body"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e M06 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "M07-stored-increment-toggle",
+  "title": "Valori conservati: due incrementi da zero e un booleano che parte da falso",
+  "cond": "none",
+  "rule": {
+   "name": "M07-stored-increment-toggle",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_stored",
+     "key": "e2e_m07_count",
+     "op": "INCREMENT"
+    },
+    {
+     "type": "set_stored",
+     "key": "e2e_m07_count",
+     "op": "INCREMENT",
+     "value": "4"
+    },
+    {
+     "type": "set_stored",
+     "key": "e2e_m07_flag",
+     "op": "TOGGLE"
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "and",
+      "all": [
+       {
+        "type": "stored_compare",
+        "key": "e2e_m07_count",
+        "valueType": "NUMBER",
+        "op": "EQ",
+        "expected": "5"
+       },
+       {
+        "type": "stored_compare",
+        "key": "e2e_m07_flag",
+        "valueType": "BOOLEAN",
+        "op": "EQ",
+        "expected": "true"
+       }
+      ]
+     },
+     "then": [
+      {
+       "type": "show_notification",
+       "title": "e2e M07 {{RUN}}",
+       "text": "e2e body"
+      }
+     ]
+    },
+    {
+     "type": "set_stored",
+     "key": "e2e_m07_flag",
+     "op": "CLEAR"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e M07 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "M08-stored-missing-is-unknown-under-not",
+  "title": "Valori conservati: una chiave assente è sconosciuta e non scatta nemmeno sotto «non»",
+  "cond": "false",
+  "rule": {
+   "name": "M08-stored-missing-is-unknown-under-not",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e M08 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "not",
+    "cond": {
+     "type": "stored_compare",
+     "key": "e2e_m08_missing",
+     "valueType": "TEXT",
+     "op": "EQ",
+     "expected": "x"
+    }
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  }
+ },
+ {
+  "id": "M09-set-user-mode-then-check",
+  "title": "Modalità: set_user_mode cambia la modalità attiva e un «se» la rilegge",
+  "cond": "none",
+  "rule": {
+   "name": "M09-set-user-mode-then-check",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_user_mode",
+     "mode": "E2E Lavoro"
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "user_mode_is",
+      "mode": "e2e lavoro"
+     },
+     "then": [
+      {
+       "type": "show_notification",
+       "title": "e2e M09 {{RUN}}",
+       "text": "e2e body"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e M09 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "M10-unknown-mode-refused",
+  "title": "Modalità: una regola che nomina una modalità che non esiste non si arma",
+  "cond": "none",
+  "rule": {
+   "name": "M10-unknown-mode-refused",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_user_mode",
+     "mode": "E2E Inesistente"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "user_mode_unknown"
+    }
+   }
+  }
+ }
+]

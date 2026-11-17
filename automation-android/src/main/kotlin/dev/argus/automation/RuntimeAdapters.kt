@@ -16,6 +16,9 @@ import dev.argus.device.ForegroundAppSource
 import dev.argus.device.StateReader
 import dev.argus.device.ParametricStateReader
 import dev.argus.device.PublicStateReader
+import dev.argus.automation.calendar.CalendarTriggerRuntime
+import dev.argus.automation.calendar.NoopCalendarTriggerRuntime
+import dev.argus.automation.context.DeviceFactsReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
@@ -34,11 +37,16 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.StoredValue
+import dev.argus.engine.model.UserModeSnapshot
+import dev.argus.engine.runtime.StoredValueStore
+import dev.argus.engine.runtime.UserModeStore
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.DeviceFacts
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.NoopAuditSink
@@ -90,6 +98,10 @@ class LazyDeviceStateProvider(
      * nessun backend privilegiato è disponibile: con Shizuku attivo il comportamento non cambia.
      */
     private val usageForeground: ForegroundAppSource? = null,
+    /** 0.8: connessioni, cuffie e calendario delle condizioni di contesto; null = mai leggibili. */
+    private val factsReader: DeviceFactsReader? = null,
+    /** 0.8: valori conservati e modalità. `null` = assenti, quindi UNKNOWN (fallisce chiuso). */
+    private val persistentState: PersistentStateReader? = null,
 ) : DeviceStateSnapshotProvider {
     constructor(
         reader: StateReader,
@@ -99,6 +111,8 @@ class LazyDeviceStateProvider(
         publicReader: PublicStateReader? = null,
         privilegedReady: (() -> Boolean)? = null,
         usageForeground: ForegroundAppSource? = null,
+        factsReader: DeviceFactsReader? = null,
+        persistentState: PersistentStateReader? = null,
     ) : this(
         reader,
         shizuku::status,
@@ -107,6 +121,8 @@ class LazyDeviceStateProvider(
         publicReader,
         privilegedReady,
         usageForeground,
+        factsReader,
+        persistentState,
     )
 
     override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
@@ -170,11 +186,26 @@ class LazyDeviceStateProvider(
         } else {
             null
         }
+        // 0.8: API pubbliche, senza Shizuku; ciò che non si legge resta null (UNKNOWN).
+        val facts = if (request.facts.isNotEmpty()) {
+            try {
+                factsReader?.read(request.facts) ?: DeviceFacts()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                DeviceFacts()
+            }
+        } else {
+            DeviceFacts()
+        }
         return request.project(
             privileged.copy(
                 values = publicValues + privileged.values,
                 location = point,
                 queryValues = queryValues,
+                facts = facts,
+                stored = persistentState?.stored(request.storedKeys).orEmpty(),
+                userMode = if (request.includeUserMode) persistentState?.userMode() else null,
             ),
         )
     }
@@ -188,6 +219,34 @@ class LazyDeviceStateProvider(
         } catch (_: Exception) {
             emptyMap()
         }
+    }
+}
+
+/**
+ * 0.8: lettura di valori conservati e modalità per lo snapshot dell'Engine. Un errore del database equivale a
+ * «non leggibile»: valore assente, quindi UNKNOWN, mai un default.
+ */
+class PersistentStateReader(
+    private val stored: StoredValueStore,
+    private val modes: UserModeStore,
+) {
+    suspend fun stored(keys: Set<String>): Map<String, StoredValue> {
+        if (keys.isEmpty()) return emptyMap()
+        return try {
+            stored.read(keys)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    suspend fun userMode(): UserModeSnapshot? = try {
+        modes.snapshot()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
     }
 }
 
@@ -329,33 +388,72 @@ class AndroidArmedAutomationRegistrar(
     private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
     /** Production: sgancia il fire immediato dalla coroutine UI e ne possiede la durata via FGS. */
     private val foregroundLauncher: ReceiverWorkLauncher? = null,
+    /** 0.8: sveglie per regola del trigger `calendar_event`. */
+    private val calendar: CalendarTriggerRuntime = NoopCalendarTriggerRuntime,
+    /** 0.8: le sveglie di fine delle regole-intervallo (orario o prossima sveglia come trigger di fine). */
+    private val exitTimeAlarms: TimeAlarmCoordinator? = null,
+    /** 0.8: before the coordinator may recover a due alarm, what the rules did before the first unlock is in the Log. */
+    private val beforeTimeReconcile: suspend () -> Unit = {},
 ) : ArmedAutomationRegistrar {
-    override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
+    /**
+     * 0.8: una regola-intervallo è armata solo se anche la sua FINE è registrata: un intervallo che non può finire
+     * lascerebbe i valori cambiati. Il trigger di fine non è mai immediato né manuale (validator).
+     */
+    override suspend fun register(automation: Automation): Boolean {
+        if (!register(automation, automation.trigger)) return false
+        val end = automation.exit?.trigger ?: return true
+        return when (end) {
+            is Trigger.Immediate, is Trigger.Manual -> false
+            else -> register(automation, end)
+        }
+    }
+
+    private suspend fun register(automation: Automation, trigger: Trigger): Boolean = when (trigger) {
         is Trigger.Time -> registerTime(automation)
         is Trigger.Immediate -> registerImmediate(automation)
         is Trigger.Notification -> registerNotification(automation)
         // I receiver manifest sono sempre attivi: la registrazione OS è il grant runtime
         // stesso, verificato qui con la capability granulare dell'evento (sms vs call).
-        is Trigger.PhoneState -> registerBroadcastBacked(automation)
-        is Trigger.Connectivity -> registerConnectivity(automation)
-        is Trigger.Geofence -> registerGeofence(automation)
-        is Trigger.Sensor -> registerSensor(automation)
+        is Trigger.PhoneState -> registerBroadcastBacked(automation, trigger)
+        is Trigger.Connectivity -> registerConnectivity(automation, trigger)
+        is Trigger.Geofence -> registerGeofence(automation, trigger)
+        is Trigger.Sensor -> registerSensor(automation, trigger)
         // 0.4.1: eventi di sistema senza Shizuku, registrati dalla sentinella condivisa.
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
         is Trigger.Media,
         // 0.5.1: app aperta/chiusa, letta dalla sentinella condivisa (serve l'accesso ai dati di utilizzo).
         is Trigger.AppEvent,
-        -> registerDeviceEvent(automation)
+        -> registerDeviceEvent(automation, trigger)
         // 0.4.1: avvio manuale. Nessuna registrazione OS: parte solo da un gesto dell'utente. Basta che
         // la capability sia pubblicata e che la regola sia davvero armata nello store.
-        is Trigger.Manual -> registerBroadcastBacked(automation)
+        is Trigger.Manual -> registerBroadcastBacked(automation, trigger)
+        // 0.8 scaffold: nessuna sorgente ancora (il validator li rifiuta con not_available_yet). Chi
+        // implementa un trigger registra qui la sua sorgente al posto di `false`.
+        is Trigger.CalendarEvent -> registerCalendar(automation, trigger)
+
+        // 0.8: il tag arriva dal trampolino NFC (receiver del sistema, sempre attivo): basta che la capability
+        // sia pubblicata (telefono con NFC) e che la regola sia armata. Niente da tenere acceso.
+        is Trigger.NfcTag -> registerBroadcastBacked(automation, trigger)
+
+        // 0.8: la prossima sveglia passa dallo stesso coordinatore delle regole a orario.
+        is Trigger.NextAlarm -> registerTime(automation)
+
+        // 0.8: tempo d'uso di un'app, letto dalla sentinella condivisa come app_event.
+        is Trigger.AppUsage -> registerDeviceEvent(automation, trigger)
+
+        // 0.8: la sorgente è UserModeSwitcher (schermata, riquadro, widget, set_user_mode): nessuna
+        // registrazione OS, come l'avvio manuale.
+        is Trigger.UserModeChanged -> registerBroadcastBacked(automation, trigger)
     }
 
+    /** Orari e prossima sveglia: i due coordinatori (inizio e fine) si riallineano insieme. */
     private suspend fun registerTime(automation: Automation): Boolean = try {
+        beforeTimeReconcile()
         val report = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        val exitReport = exitTimeAlarms?.reconcile(ReconcileReason.CAPABILITY_CHANGED)
         val persisted = store.get(automation.id)
-        automation.id !in report.failed && persisted?.status == AutomationStatus.ARMED &&
-            persisted.enabled
+        automation.id !in report.failed && automation.id !in exitReport?.failed.orEmpty() &&
+            persisted?.status == AutomationStatus.ARMED && persisted.enabled
     } catch (error: CancellationException) {
         throw error
     } catch (_: Exception) {
@@ -431,10 +529,10 @@ class AndroidArmedAutomationRegistrar(
         false
     }
 
-    private suspend fun registerBroadcastBacked(automation: Automation): Boolean = try {
+    private suspend fun registerBroadcastBacked(automation: Automation, trigger: Trigger): Boolean = try {
         val snapshot = snapshots.current()
         val persisted = store.get(automation.id)
-        val required = CapabilityRequirements.derive(automation.trigger, emptyList())
+        val required = CapabilityRequirements.derive(trigger, emptyList())
         required.all { it in snapshot.availableCapabilities } &&
             persisted?.status == AutomationStatus.ARMED && persisted.enabled
     } catch (error: CancellationException) {
@@ -443,9 +541,9 @@ class AndroidArmedAutomationRegistrar(
         false
     }
 
-    private suspend fun registerConnectivity(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
-        val medium = (automation.trigger as Trigger.Connectivity).medium
+    private suspend fun registerConnectivity(automation: Automation, trigger: Trigger.Connectivity): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
+        val medium = trigger.medium
         if (medium == ConnMedium.BT) return true
         return try {
             val report = connectivity.reconcile()
@@ -462,8 +560,8 @@ class AndroidArmedAutomationRegistrar(
      * del trigger deve essere pubblicata, poi il reconcile della sentinella accende il servizio e
      * registra la sorgente. Armata solo se la sentinella è davvero attiva.
      */
-    private suspend fun registerDeviceEvent(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
+    private suspend fun registerDeviceEvent(automation: Automation, trigger: Trigger): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = connectivity.reconcile()
             report.active && automation.id in report.requiredBy && automation.id !in report.failed
@@ -474,8 +572,8 @@ class AndroidArmedAutomationRegistrar(
         }
     }
 
-    private suspend fun registerGeofence(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
+    private suspend fun registerGeofence(automation: Automation, trigger: Trigger): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = geofence.reconcile(recreateOsRegistrations = false)
             automation.id in report.requiredBy && automation.id !in report.failed
@@ -486,15 +584,31 @@ class AndroidArmedAutomationRegistrar(
         }
     }
 
-    private suspend fun registerSensor(automation: Automation): Boolean {
+    private suspend fun registerSensor(automation: Automation, trigger: Trigger): Boolean {
         // Il pre-check verifica la capability granulare `trigger.sensor.<kind>`, pubblicata dal
         // probe solo quando hardware, grant e backend collegato coincidono.
-        if (!registerBroadcastBacked(automation)) return false
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = sensor.reconcile()
             automation.id in report.requiredBy &&
                 automation.id !in report.needsReview &&
                 automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 0.8, calendario: capability pubblicata (permesso `READ_CALENDAR`), poi il reconcile legge il
+     * calendario e programma la prossima istanza. Armata solo se il calendario si è letto davvero.
+     */
+    private suspend fun registerCalendar(automation: Automation, trigger: Trigger): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
+        return try {
+            val report = calendar.reconcile()
+            automation.id in report.requiredBy && automation.id !in report.failed
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

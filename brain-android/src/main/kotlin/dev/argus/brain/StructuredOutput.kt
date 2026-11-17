@@ -1,5 +1,9 @@
 package dev.argus.brain
 
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputKind
+import dev.argus.engine.model.OutputSpec
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -42,6 +46,19 @@ internal object StructuredOutput {
     /** true se [error] è un rifiuto del parametro da cui si può scendere al livello sotto. */
     fun isRejection(error: TransportException): Boolean =
         error.kind == TransportErrorKind.HTTP && error.statusCode in REJECTION_STATUSES
+
+    /**
+     * true se il rifiuto va RICORDATO per la vita del transport: un 4xx il cui messaggio nomina il parametro
+     * (`response_format`, `json_schema`, `output_config`…). Un 500 (anche quello di llama.cpp) o un 4xx che
+     * parla d'altro fanno scendere di livello solo quella richiesta: un errore passeggero del server non
+     * spegne per sempre l'output strutturato.
+     */
+    fun isLastingRejection(error: TransportException): Boolean =
+        isRejection(error) && error.statusCode in 400..499 &&
+            error.providerMessage?.let(PARAMETER_NAMES::containsMatchIn) == true
+
+    private val PARAMETER_NAMES =
+        Regex("response_format|json_schema|json_object|output_config|output_format|structured output|schema", RegexOption.IGNORE_CASE)
 
     private fun nullable(type: String): JsonObject = buildJsonObject {
         putJsonArray("type") {
@@ -110,6 +127,84 @@ internal object StructuredOutput {
         }
         StructuredLevel.OBJECT -> buildJsonObject { put("type", "json_object") }
         StructuredLevel.NONE -> null
+    }
+
+    /** Nome dello schema della risposta vincolata di `invoke_llm.output` (0.8). */
+    const val ANSWER_SCHEMA_NAME = "argus_answer"
+
+    /**
+     * `response_format` della risposta vincolata (0.8): `{"answer": …}` con un enum per CHOICE, un intero
+     * fra min e max per NUMBER, un booleano per BOOLEAN. È solo una richiesta: la lane ricontrolla sempre
+     * il testo con [LlmOutputPolicy.normalize].
+     */
+    fun answerFormat(spec: OutputSpec): JsonObject = buildJsonObject {
+        put("type", "json_schema")
+        putJsonObject("json_schema") {
+            put("name", ANSWER_SCHEMA_NAME)
+            put("strict", true)
+            putJsonObject("schema") {
+                put("type", "object")
+                putJsonObject("properties") { put("answer", answerSchema(spec)) }
+                putJsonArray("required") { add(JsonPrimitive("answer")) }
+                put("additionalProperties", false)
+            }
+        }
+    }
+
+    private fun answerSchema(spec: OutputSpec): JsonObject = buildJsonObject {
+        when (spec.kind) {
+            OutputKind.CHOICE -> {
+                put("type", "string")
+                putJsonArray("enum") { spec.choices.forEach { add(JsonPrimitive(it)) } }
+            }
+            OutputKind.NUMBER -> {
+                put("type", "integer")
+                spec.min?.let { put("minimum", it) }
+                spec.max?.let { put("maximum", it) }
+            }
+            OutputKind.BOOLEAN -> put("type", "boolean")
+        }
+    }
+
+    /**
+     * Il valore di `{"answer": …}` come testo (`true`/`false` per un booleano); il testo così com'è se il
+     * modello non ha risposto con l'oggetto. Nessuna coercizione: la validazione resta a valle.
+     */
+    fun unwrapAnswer(text: String): String {
+        val answer = try {
+            (Json.parseToJsonElement(text.trim()) as? JsonObject)?.get("answer") as? JsonPrimitive
+        } catch (_: IllegalArgumentException) {
+            null
+        } ?: return text
+        return answer.content.takeIf { it.isNotBlank() } ?: text
+    }
+
+    /**
+     * `output_config` della risposta vincolata su Anthropic (0.8): `{"answer": …}` chiuso. Lo schema di
+     * Anthropic non accetta i limiti numerici (`minimum`/`maximum`): per NUMBER resta un intero, i limiti
+     * stanno nell'istruzione del goal e nella validazione della lane.
+     */
+    fun anthropicAnswerConfig(spec: OutputSpec): JsonObject = buildJsonObject {
+        putJsonObject("format") {
+            put("type", "json_schema")
+            putJsonObject("schema") {
+                put("type", "object")
+                putJsonObject("properties") {
+                    putJsonObject("answer") {
+                        when (spec.kind) {
+                            OutputKind.CHOICE -> {
+                                put("type", "string")
+                                putJsonArray("enum") { spec.choices.forEach { add(JsonPrimitive(it)) } }
+                            }
+                            OutputKind.NUMBER -> put("type", "integer")
+                            OutputKind.BOOLEAN -> put("type", "boolean")
+                        }
+                    }
+                }
+                putJsonArray("required") { add(JsonPrimitive("answer")) }
+                put("additionalProperties", false)
+            }
+        }
     }
 
     /** `output_config` della Messages API di Anthropic: `format` di tipo `json_schema`, GA e senza header beta. */

@@ -1,6 +1,7 @@
 package dev.argus.automation
 
 import android.os.SystemClock
+import dev.argus.automation.budget.ProviderBoundBrain
 import dev.argus.brain.AgentTransport
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.BridgeException
@@ -16,6 +17,7 @@ import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
@@ -46,7 +48,7 @@ class ConfiguredBridgeBrain(
     private val privacyAccepted: () -> Boolean,
     private val factory: TransportFactory = DefaultTransportFactory(configuration),
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
-) : Brain {
+) : ProviderBoundBrain {
     @Volatile
     private var cached: Pair<ProviderConfig, AgentTransport>? = null
 
@@ -54,25 +56,17 @@ class ConfiguredBridgeBrain(
         nl: String,
         manifest: CapabilityManifest,
         state: DeviceState,
-    ): CompileResult {
-        requirePrivacyConsent()
-        return TransportBackedBrain(currentTransport()).compile(nl, manifest, state)
-    }
+    ): CompileResult = selected().compile(nl, manifest, state)
 
     override suspend fun act(
         context: FireContext,
         goal: String,
         contextSources: List<String>,
         allowedTools: List<String>,
-    ): ActResult {
-        requirePrivacyConsent()
-        return TransportBackedBrain(currentTransport()).act(context, goal, contextSources, allowedTools)
-    }
+    ): ActResult = selected().act(context, goal, contextSources, allowedTools)
 
-    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
-        requirePrivacyConsent()
-        return TransportBackedBrain(currentTransport()).actV2(context, action)
-    }
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
+        selected().actV2(context, action)
 
     override suspend fun actResolved(
         context: FireContext,
@@ -80,10 +74,76 @@ class ConfiguredBridgeBrain(
         contextSources: List<String>,
         allowedTools: List<String>,
         runtimeData: List<RuntimeDataBinding>,
-    ): ActResult {
+    ): ActResult = selected().actResolved(context, goal, contextSources, allowedTools, runtimeData)
+
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult = selected().actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
+
+    /** Senza consenso privacy non si legge nemmeno la configurazione del provider. */
+    private fun selected(): Brain {
         requirePrivacyConsent()
-        return TransportBackedBrain(currentTransport())
-            .actResolved(context, goal, contextSources, allowedTools, runtimeData)
+        return boundTo(configuration.selectedProviderConfig())
+    }
+
+    /**
+     * Il brain per una [ProviderConfig] precisa, quella che il budget ha ammesso (S10): la config non
+     * si rilegge fra ammissione e chiamata. Consenso privacy e transport si risolvono alla chiamata.
+     */
+    override fun boundTo(config: ProviderConfig): Brain = object : Brain {
+        override suspend fun compile(
+            nl: String,
+            manifest: CapabilityManifest,
+            state: DeviceState,
+        ): CompileResult {
+            requirePrivacyConsent()
+            return TransportBackedBrain(transportFor(config)).compile(nl, manifest, state)
+        }
+
+        override suspend fun act(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+        ): ActResult {
+            requirePrivacyConsent()
+            return TransportBackedBrain(transportFor(config)).act(context, goal, contextSources, allowedTools)
+        }
+
+        override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+            requirePrivacyConsent()
+            return TransportBackedBrain(transportFor(config)).actV2(context, action)
+        }
+
+        override suspend fun actResolved(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+            runtimeData: List<RuntimeDataBinding>,
+        ): ActResult {
+            requirePrivacyConsent()
+            return TransportBackedBrain(transportFor(config))
+                .actResolved(context, goal, contextSources, allowedTools, runtimeData)
+        }
+
+        override suspend fun actConstrained(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+            runtimeData: List<RuntimeDataBinding>,
+            output: OutputSpec,
+        ): ActResult {
+            requirePrivacyConsent()
+            return TransportBackedBrain(transportFor(config))
+                .actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
+        }
     }
 
     suspend fun health(): BridgeHealthResult {
@@ -121,8 +181,9 @@ class ConfiguredBridgeBrain(
      * try di [TransportBackedBrain]: è lo stesso canale del blocco privacy, già gestito da
      * ChatViewModel e dalla lane generativa.
      */
-    private fun currentTransport(): AgentTransport {
-        val config = configuration.selectedProviderConfig()
+    private fun currentTransport(): AgentTransport = transportFor(configuration.selectedProviderConfig())
+
+    private fun transportFor(config: ProviderConfig): AgentTransport {
         cached?.takeIf { it.first == config }?.second?.let { return it }
         return synchronized(this) {
             cached?.takeIf { it.first == config }?.second

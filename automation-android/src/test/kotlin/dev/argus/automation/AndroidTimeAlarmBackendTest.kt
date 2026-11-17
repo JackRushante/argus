@@ -115,6 +115,28 @@ class AndroidTimeAlarmBackendTest {
     }
 
     @Test
+    fun `the end alarm of a span has its own uri and comes back with its phase`() {
+        val id = AutomationId("span")
+        val fingerprint = ApprovalFingerprint("b".repeat(64))
+        val start = AndroidTimeAlarmBackend.identityIntent(context, id)
+        val end = AndroidTimeAlarmBackend.identityIntent(context, id, dev.argus.engine.runtime.SpanPhase.EXIT).apply {
+            putExtra(AndroidTimeAlarmBackend.EXTRA_AUTOMATION_ID, id.value)
+            putExtra(AndroidTimeAlarmBackend.EXTRA_APPROVAL_FINGERPRINT, fingerprint.value)
+            putExtra(AndroidTimeAlarmBackend.EXTRA_EVENT_AT_MILLIS, 99L)
+        }
+        // URI diverso ⇒ PendingIntent diverso: la sveglia di fine non sostituisce quella d'inizio.
+        assertTrue(!start.filterEquals(end))
+        assertEquals(
+            TimeAlarmSignal(id, fingerprint, 99L, dev.argus.engine.runtime.SpanPhase.EXIT),
+            AndroidTimeAlarmBackend.parseSignal(end),
+        )
+        assertEquals(
+            ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED,
+            reconcileReason(AndroidTimeAlarmBackend.ACTION_TIME_WATCHDOG_EXIT),
+        )
+    }
+
+    @Test
     fun `alarm intent is flagged foreground so a frozen process cannot defer delivery`() {
         // Campo #63 (2026-07-17): con setExactAndAllowWhileIdle + permesso + battery whitelist,
         // gli scatti arrivavano comunque +37s/+56s tardi. Android 14+ accoda i broadcast verso
@@ -135,5 +157,47 @@ class AndroidTimeAlarmBackendTest {
             reconcileReason(AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED),
         )
         assertNull(reconcileReason("com.example.UNTRUSTED"))
+    }
+
+    @Test
+    fun `the watchdog is one inexact allow while idle alarm that triggers a reconcile`() {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        val shadow = shadowOf(alarmManager)
+        val backend = AndroidTimeAlarmBackend(context)
+
+        backend.syncWatchdog(1_900_000_000_000)
+        backend.syncWatchdog(1_900_000_060_000)
+
+        val watchdog = shadow.scheduledAlarms.single()
+        assertEquals(1_900_000_060_000, watchdog.triggerAtMs)
+        assertTrue(watchdog.isAllowWhileIdle)
+        val fired = shadowOf(watchdog.operation).savedIntent
+        assertEquals(
+            ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED,
+            reconcileReason(fired.action),
+        )
+
+        backend.syncWatchdog(null)
+        assertEquals(emptyList(), shadow.scheduledAlarms)
+    }
+
+    @Test
+    fun `the watchdog never replaces a rule alarm`() {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        val shadow = shadowOf(alarmManager)
+        val backend = AndroidTimeAlarmBackend(context)
+        backend.schedule(
+            TimeAlarmRegistration(
+                automationId = AutomationId("rule"),
+                approvalFingerprint = ApprovalFingerprint("d".repeat(64)),
+                eventAtMillis = 1_900_000_000_000,
+                requestedPrecision = TimePrecision.EXACT,
+            ),
+        )
+
+        backend.syncWatchdog(1_900_000_120_000)
+        backend.syncWatchdog(null)
+
+        assertEquals(1_900_000_000_000, shadow.scheduledAlarms.single().triggerAtMs)
     }
 }

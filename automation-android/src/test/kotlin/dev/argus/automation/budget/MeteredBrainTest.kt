@@ -237,7 +237,7 @@ class MeteredBrainTest {
     }
 
     @Test
-    fun `usage assente registra token null non zero`() = runTest {
+    fun `usage assente registra una stima marcata dei token e nessun costo`() = runTest {
         val hermes = ProviderConfig(ProviderId.HERMES, "https://hermes", null)
         val delegate = FakeBrain(actResult = { ActResult("risposta", null, usage = null) })
         val dao = RecordingUsageDao()
@@ -247,10 +247,70 @@ class MeteredBrainTest {
 
         val event = dao.events.single()
         assertEquals(UsageEventOutcome.OK, event.outcome)
-        assertNull(event.tokensIn)
-        assertNull(event.tokensOut)
+        // 500 di prompt fisso + ("rispondi" + "x" = 9 caratteri -> 3 token); risposta 8 caratteri -> 2.
+        assertEquals(503L, event.tokensIn)
+        assertEquals(2L, event.tokensOut)
         assertNull(event.costMicros)
+        assertEquals(UsageEventEntity.TOKEN_ESTIMATE, event.pricingVersion)
+    }
+
+    @Test
+    fun `an estimated usage makes a monthly token cap trip`() = runTest {
+        val hermes = ProviderConfig(ProviderId.HERMES, "https://hermes", null)
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxTokensPerMonth = 1_000)))
+        val delegate = FakeBrain(actResult = { ActResult("risposta", null, usage = null) })
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = hermes, settings = settings)
+
+        brain.actV2(context(), invokeV2())
+        brain.actV2(context(), invokeV2())
+        val third = brain.actV2(context(), invokeV2())
+
+        // 505 token stimati a chiamata: alla terza il tetto da 1000 è superato.
+        assertEquals(2, delegate.calls)
+        assertEquals(BudgetMeta.BUDGET_EXCEEDED, third.metaError)
+    }
+
+    @Test
+    fun `a call without a model response gets no estimate`() = runTest {
+        val hermes = ProviderConfig(ProviderId.HERMES, "https://hermes", null)
+        val dao = RecordingUsageDao()
+        val brain = metered(FakeBrain(actResult = { ActResult(null, "bridge_timeout") }), FakePolicy(), dao, config = hermes)
+
+        brain.actV2(context(), invokeV2())
+
+        val event = dao.events.single()
+        assertNull(event.tokensIn)
         assertNull(event.pricingVersion)
+    }
+
+    @Test
+    fun `the call goes to the provider admitted by the budget not to a newer selection`() = runTest {
+        var selected = openai
+        val bound = mutableListOf<ProviderConfig>()
+        val delegate = object : ProviderBoundBrain, Brain by FakeBrain() {
+            override fun boundTo(config: ProviderConfig): Brain {
+                bound += config
+                // La selezione cambia fra ammissione e chiamata: il brain deve restare sull'ammesso.
+                selected = ProviderConfig(ProviderId.HERMES, "https://hermes", null)
+                return FakeBrain(actResult = { ActResult("risposta", null) })
+            }
+        }
+        val dao = RecordingUsageDao()
+        val brain = MeteredBrain(
+            delegate = delegate,
+            policy = FakePolicy(),
+            usage = dao,
+            selectedConfig = { selected },
+            audit = RecordingAuditSink(),
+            alerts = RecordingAlerts(),
+            nowMillis = { 1_700_000_000_000L },
+        )
+
+        brain.actV2(context(), invokeV2())
+
+        assertEquals(listOf(openai), bound)
+        assertEquals("openai", dao.events.single().providerId)
     }
 
     @Test
@@ -440,13 +500,83 @@ class MeteredBrainTest {
     }
 
     @Test
-    fun `cancellation si propaga senza eventi`() = runTest {
+    fun `a call cancelled after dispatch propagates and records an error event without tokens`() = runTest {
         val delegate = FakeBrain(actResult = { throw CancellationException("cancel") })
         val dao = RecordingUsageDao()
         val brain = metered(delegate, FakePolicy(), dao, config = openai)
 
         assertFailsWith<CancellationException> { brain.actV2(context(), invokeV2()) }
-        assertTrue(dao.events.isEmpty())
+        // La richiesta era già partita: i tetti chiamate devono vederla.
+        val event = dao.events.single()
+        assertEquals(UsageEventOutcome.ERROR, event.outcome)
+        assertNull(event.tokensIn)
+        assertNull(event.tokensOut)
+        assertNull(event.costMicros)
+    }
+
+    @Test
+    fun `a call cut by the lane timeout counts in the hourly call cap`() = runTest {
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
+        val delegate = FakeBrain(actResult = { delay(120_000); ActResult("tardi", null) })
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
+
+        assertNull(kotlinx.coroutines.withTimeoutOrNull(60_000) { brain.actV2(context(), invokeV2()) })
+        val next = brain.actV2(context(), invokeV2())
+
+        assertEquals(1, delegate.calls)
+        assertEquals(BudgetMeta.BUDGET_EXCEEDED, next.metaError)
+    }
+
+    @Test
+    fun `a limit change re-arms an alert already given in the same window`() = runTest {
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 10)))
+        val alerts = RecordingAlerts()
+        val brain = MeteredBrain(
+            delegate = FakeBrain(actResult = { ActResult("risposta", null) }),
+            policy = FakePolicy(BudgetVerdict.SoftExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))),
+            usage = RecordingUsageDao(),
+            selectedConfig = { openai },
+            audit = RecordingAuditSink(),
+            alerts = alerts,
+            nowMillis = { 1_700_000_000_000L },
+            settings = settings,
+        )
+
+        brain.actV2(context(), invokeV2())
+        brain.actV2(context(), invokeV2())
+        assertEquals(1, alerts.calls)
+
+        settings.update(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 20)))
+        brain.actV2(context(), invokeV2())
+        assertEquals(2, alerts.calls, "un limite alzato e di nuovo vicino va segnalato")
+    }
+
+    @Test
+    fun `alerts of closed windows are forgotten`() = runTest {
+        var currentNow = 1_700_000_000_000L
+        val alerts = RecordingAlerts()
+        val brain = MeteredBrain(
+            delegate = FakeBrain(actResult = { ActResult("risposta", null) }),
+            policy = FakePolicy(BudgetVerdict.SoftExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))),
+            usage = RecordingUsageDao(),
+            selectedConfig = { openai },
+            audit = RecordingAuditSink(),
+            alerts = alerts,
+            nowMillis = { currentNow },
+        )
+
+        repeat(100) {
+            brain.actV2(context(), invokeV2())
+            currentNow += UsageWindows.HOUR_MILLIS
+        }
+
+        assertEquals(100, alerts.calls)
+        // Restano solo le ore dell'ultimo mese circa, non tutte quelle mai viste.
+        assertTrue(brain.rememberedAlertCount() <= 32 * 24, "${brain.rememberedAlertCount()}")
+        currentNow += 40L * 24 * UsageWindows.HOUR_MILLIS
+        brain.actV2(context(), invokeV2())
+        assertEquals(1, brain.rememberedAlertCount())
     }
 
     @Test
@@ -526,7 +656,9 @@ class MeteredBrainTest {
     @Test
     fun `the reservation is released when the call throws or is cancelled`() = runTest {
         val dao = AggregatingUsageDao()
-        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
+        // Due slot: uno lo consuma la chiamata cancellata (registrata), l'altro resta solo se nessuna
+        // prenotazione è rimasta appesa.
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 2)))
         var mode = "throw"
         val delegate = FakeBrain(
             actResult = {
@@ -547,10 +679,11 @@ class MeteredBrainTest {
         runCurrent()
         mode = "ok"
 
-        // Né l'eccezione né la cancellazione hanno lasciato lo slot prenotato.
+        // Né l'eccezione né la cancellazione hanno lasciato lo slot prenotato: la chiamata cancellata
+        // conta come evento (era partita), la prenotazione no.
         val result = brain.actV2(context(), invokeV2())
         assertEquals("risposta", result.text)
-        assertEquals(listOf(UsageEventOutcome.OK), dao.events.map { it.outcome })
+        assertEquals(listOf(UsageEventOutcome.ERROR, UsageEventOutcome.OK), dao.events.map { it.outcome })
     }
 
     @Test
@@ -945,13 +1078,25 @@ class MeteredBrainTest {
         override suspend fun tokensBetween(
             startMillis: Long,
             endMillisExclusive: Long,
-        ): List<ProviderTokensAggregate> = emptyList()
+        ): List<ProviderTokensAggregate> = events
+            .filter { it.timestampMs >= startMillis && it.timestampMs < endMillisExclusive }
+            .groupBy { it.providerId }
+            .map { (provider, rows) ->
+                ProviderTokensAggregate(
+                    providerId = provider,
+                    tokensIn = rows.mapNotNull { it.tokensIn }.takeIf { it.isNotEmpty() }?.sum(),
+                    tokensOut = rows.mapNotNull { it.tokensOut }.takeIf { it.isNotEmpty() }?.sum(),
+                )
+            }
 
         override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
     }
 
     private class FixedSettings(settings: BudgetSettings) : BudgetSettingsStore {
         private val state = MutableStateFlow(settings)
+        fun update(settings: BudgetSettings) {
+            state.value = settings
+        }
         override fun observe(): StateFlow<BudgetSettings> = state
         override suspend fun setGlobalLimits(limits: BudgetLimits): Boolean = true
         override suspend fun setProviderLimits(id: ProviderId, limits: BudgetLimits): Boolean = true

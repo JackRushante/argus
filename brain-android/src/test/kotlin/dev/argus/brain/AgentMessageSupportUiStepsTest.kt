@@ -55,12 +55,23 @@ class AgentMessageSupportUiStepsTest {
     @Test
     fun `a tool that is off is explained to the user with how to turn it on, never as a missing feature`() {
         val rules = AgentMessageSupport.COMPILE_RULES.replace(Regex("\\s+"), " ")
-        val rule = rules.substring(rules.indexOf("A tool in manifest.unavailable_tools"), rules.indexOf(" 2. Use only keys"))
+        val rule = rules.substring(rules.indexOf("Only a tool in manifest.unavailable_tools"), rules.indexOf(" 2. Use only keys"))
         assertTrue("the value says why" in rule, rule)
         assertTrue("never say the function does not exist or is not available in this version" in rule, rule)
         assertTrue("how to turn it on" in rule, rule)
-        assertTrue("ui_steps" in rule && "Accessibility service" in rule, rule)
         assertTrue("unsupported_capability" in rule, rule)
+        // Il come accenderlo sta nel valore del manifest (REASON_ACCESSIBILITY): l'esempio nella regola faceva
+        // credere al modello che ui_steps fosse spento anche quando era in available_tools.
+        assertFalse("Accessibility service" in rule, rule)
+    }
+
+    @Test
+    fun `a listed tool is available now and never blamed on a missing permission`() {
+        val rules = AgentMessageSupport.COMPILE_RULES.replace(Regex("\\s+"), " ")
+        val rule = rules.substring(rules.indexOf("1. Use only action types"), rules.indexOf("Only a tool in manifest.unavailable_tools"))
+        assertTrue("ui_steps" in rule && "run_shell" in rule && "write_setting" in rule, rule)
+        assertTrue("available right now" in rule, rule)
+        assertTrue("never claim it needs a permission, Shizuku or a service" in rule, rule)
     }
 
     @Test

@@ -461,6 +461,7 @@ class RoomExecutionJournalTest {
                 maxExecutions = 2,
                 maxAgeMillis = 1_000,
                 runningStaleAfterMillis = 100,
+                dedupWindowMillis = 500,
             ),
         ).run(nowMillis = 2_000)
 
@@ -470,6 +471,73 @@ class RoomExecutionJournalTest {
         assertEquals(0, db.executionJournalDao().actionCount())
         assertEquals(2, db.auditDao().recent(10).size)
     }
+
+    @Test
+    fun `the row cap keeps recent dedup claims so a reposted event does not fire again`() = runTest {
+        val automationId = arm("dedup", listOf(Action.SetWifi(false)))
+        listOf(1_200L, 1_300L, 1_900L).forEachIndexed { index, at ->
+            val executionId = ExecutionId("exec-dedup-$index")
+            store.claimFire(claim(automationId, "event-$index", executionId, at))
+            journal.finish(ExecutionCompletion(executionId, ExecutionStatus.SUCCEEDED, at, 1, 0, 0))
+        }
+
+        // Tetto di 1 riga, ma tutti i claim sono nelle ultime 24 ore: restano tutti.
+        val result = RoomJournalMaintenance(
+            db,
+            JournalRetentionPolicy(maxExecutions = 1, maxAgeMillis = 1_000, runningStaleAfterMillis = 100),
+        ).run(nowMillis = 2_000)
+
+        assertEquals(0, result.deletedExecutions)
+        assertEquals(3, db.executionJournalDao().executionCount())
+        val repost = store.claimFire(claim(automationId, "event-0", ExecutionId("exec-dedup-repost"), 2_100))
+        assertFalse(repost == FireClaimResult.Claimed, "la ripubblicazione dello stesso evento resta deduplicata")
+    }
+
+    @Test
+    fun `the row cap never deletes a deferred execution whose manual reply is still deliverable`() = runTest {
+        val automationId = arm("deferred", listOf(Action.SetWifi(false)))
+        val deferred = ExecutionId("exec-deferred")
+        val expired = ExecutionId("exec-deferred-expired")
+        store.claimFire(claim(automationId, "event-deferred", deferred, 1_200))
+        store.claimFire(claim(automationId, "event-expired", expired, 1_250))
+        listOf(deferred, expired).forEach { id ->
+            journal.recordAction(ActionJournalEntry(id, 0, "invoke_llm", ActionJournalOutcome.DEFERRED, 1_210))
+            journal.finish(ExecutionCompletion(id, ExecutionStatus.DEFERRED, 1_220, 0, 0, 0, deferredCount = 1))
+        }
+        val deferredReplies = RoomDeferredReplyStore(db.deferredReplyDao())
+        deferredReplies.save(deferredReply(deferred, expiresAtMillis = 999_999))
+        deferredReplies.save(deferredReply(expired, expiresAtMillis = 1_500))
+        val newer = ExecutionId("exec-newer")
+        store.claimFire(claim(automationId, "event-newer", newer, 1_900))
+        journal.finish(ExecutionCompletion(newer, ExecutionStatus.SUCCEEDED, 1_900, 1, 0, 0))
+
+        RoomJournalMaintenance(
+            db,
+            JournalRetentionPolicy(
+                maxExecutions = 1,
+                maxAgeMillis = 1_000,
+                runningStaleAfterMillis = 100,
+                dedupWindowMillis = 100,
+            ),
+        ).run(nowMillis = 2_000)
+
+        assertEquals(ExecutionStatus.DEFERRED, db.executionJournalDao().execution(deferred.value)?.status)
+        assertTrue(deferredReplies.firstActionable(deferred.value, nowMillis = 2_000) != null)
+        // La risposta scaduta non protegge più la sua esecuzione.
+        assertNull(db.executionJournalDao().execution(expired.value))
+        assertEquals(1, db.deferredReplyDao().count())
+    }
+
+    private fun deferredReply(executionId: ExecutionId, expiresAtMillis: Long) =
+        dev.argus.data.entities.DeferredReplyEntity(
+            executionId = executionId.value,
+            actionIndex = 0,
+            packageName = "com.whatsapp",
+            createdAtMillis = 1_210,
+            expiresAtMillis = expiresAtMillis,
+            consumedAtMillis = null,
+            payload = "ciphertext",
+        )
 
     private suspend fun arm(id: String, actions: List<Action>): AutomationId {
         val created = assertIs<DraftWriteResult.Saved>(

@@ -1,6 +1,7 @@
 package dev.argus.nav
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -81,17 +82,26 @@ import dev.argus.automation.vm.AutomationDetailViewModel
 import dev.argus.automation.vm.AutomationListViewModel
 import dev.argus.automation.vm.ChatViewModel
 import dev.argus.automation.vm.DetailEvent
+import dev.argus.automation.vm.DryRunViewModel
+import dev.argus.engine.dryrun.DryRunField
 import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.automation.vm.SecretsEvent
+import dev.argus.automation.vm.SecretsViewModel
+import dev.argus.automation.vm.TemplateGalleryEvent
+import dev.argus.automation.vm.TemplateGalleryViewModel
+import dev.argus.automation.vm.ModesViewModel
 import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
 import dev.argus.ui.components.shellPrivilegeOf
+import dev.argus.ui.model.AutoBackupFrequencyUi
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
+import dev.argus.ui.model.DryRunCallbacks
 import dev.argus.ui.model.PermanentGrantUi
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.ExecutionLogCallbacks
@@ -100,12 +110,21 @@ import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
+import dev.argus.ui.model.TemplateCategoryUi
+import dev.argus.ui.model.SecretsCallbacks
+import dev.argus.ui.model.TemplateGalleryCallbacks
+import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
 import dev.argus.ui.screens.ChatScreen
+import dev.argus.ui.screens.DryRunScreen
 import dev.argus.ui.screens.ExecutionLogScreen
 import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
+import dev.argus.ui.screens.SecretsScreen
+import dev.argus.ui.screens.TemplateGalleryScreen
+import dev.argus.ui.screens.ModesScreen
+import dev.argus.ui.model.ModesCallbacks
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -117,9 +136,15 @@ private object Routes {
     const val SETTINGS = "settings"
     const val DETAIL = "detail/{id}"
     const val ONBOARDING = "onboarding"
+    const val TEMPLATES = "templates"
+    const val MODES = "modes"
+    const val SECRETS = "secrets"
+    const val DRY_RUN = "dryRun/{id}"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
     fun detail(id: String): String = "detail/${Uri.encode(id)}"
+
+    fun dryRun(id: String): String = "dryRun/${Uri.encode(id)}"
 
     fun log(automationId: String, automationName: String): String =
         "$LOG?automationId=${Uri.encode(automationId)}&automationName=${Uri.encode(automationName)}"
@@ -144,6 +169,8 @@ fun ArgusNavHost() {
     val context = LocalContext.current
     val systemSettingUnavailable = stringResource(R.string.system_setting_unavailable)
     val backupPickerUnavailable = stringResource(R.string.backup_picker_unavailable)
+    val shareCopied = stringResource(R.string.share_copied)
+    val shareClipLabel = stringResource(R.string.share_clip_label)
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -226,6 +253,32 @@ fun ArgusNavHost() {
         openAppSettings = openAppDetailsSettings,
         showMessage = showMessage,
     )
+    // 0.8: outgoing SMS and calls, contacts (screening of unknown callers only): asked only from the System health row.
+    val requestOutgoingTelephonyPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
+    // 0.8: READ_CALENDAR, chiesto solo dalla riga «Regole del calendario» per le regole che lo usano.
+    val requestCalendarPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
+    // 0.8: il ruolo «filtro chiamate» si chiede col dialogo di sistema di RoleManager.
+    val requestRoleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { afterPermissionResult() }
+    val requestCallScreeningRole = {
+        val roles = context.getSystemService(RoleManager::class.java)
+        val requested = roles != null &&
+            roles.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) &&
+            !roles.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) &&
+            runCatching {
+                requestRoleLauncher.launch(roles.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+            }.isSuccess
+        if (!requested) afterPermissionResult()
+    }
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -299,6 +352,18 @@ fun ArgusNavHost() {
     val importRulesFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> settingsViewModel.importRules(uri) }
+    // Backup automatico (0.7.2): la cartella la sceglie l'utente; il permesso persistente lo prende il VM.
+    val chooseAutoBackupFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> settingsViewModel.chooseAutoBackupFolder(uri) }
+    // Dettatura nella chat (0.7.2): il testo riconosciuto si accoda al campo, mai inviato da solo.
+    val dictationUnavailable = stringResource(R.string.dictation_unavailable)
+    val dictation = rememberSpeechDictation(
+        onRecognised = { text ->
+            chatViewModel.onInputChange(ChatDictation.merge(chatViewModel.state.value.input, text))
+        },
+        onUnavailable = { showMessage(dictationUnavailable) },
+    )
     val openShizukuDownload = {
         openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
     }
@@ -322,6 +387,19 @@ fun ArgusNavHost() {
             // essere quello filtrato su una regola, arrivato dal Dettaglio.
             restoreState = '?' !in route && route != Routes.LOG
         }
+    }
+
+    // 0.7.2: tocco di un avviso di salute, passato dal trampolino non esportato dentro il processo (mai
+    // dall'intent di MainActivity). Resta in attesa finché l'onboarding non è concluso.
+    val healthAlertLink by HealthAlertNavigation.requests.collectAsStateWithLifecycle()
+    LaunchedEffect(healthAlertLink, onboardingCompleted) {
+        val link = healthAlertLink ?: return@LaunchedEffect
+        if (!onboardingCompleted) return@LaunchedEffect
+        when (link) {
+            is AppDeepLink.Rule -> navController.navigate(Routes.detail(link.id)) { launchSingleTop = true }
+            AppDeepLink.System -> switchTop(Routes.SETTINGS)
+        }
+        HealthAlertNavigation.consume(link)
     }
 
     MessageEffect(listViewModel.messages, snackbarHostState)
@@ -358,7 +436,7 @@ fun ArgusNavHost() {
             ) {
                 composable(Routes.CHAT) {
                     ChatScreen(
-                        state = chatState,
+                        state = chatState.copy(dictationAvailable = dictation.available),
                         callbacks = object : ChatCallbacks {
                             override fun onInputChange(text: String) = chatViewModel.onInputChange(text)
                             override fun onSend() = chatViewModel.onSend()
@@ -371,6 +449,7 @@ fun ArgusNavHost() {
                             override fun onCheckConnection() = chatViewModel.refreshHealth()
                             override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                             override fun onCopyRawResponse() = chatViewModel.onCopyRawResponse()
+                            override fun onDictate() = dictation.launch()
                         },
                         modifier = Modifier.testTag("screen_chat"),
                     )
@@ -391,8 +470,98 @@ fun ArgusNavHost() {
                             override fun onBannerTap() = switchTop(Routes.SETTINGS)
                             override fun onResumeAutomations() = listViewModel.onResumeAutomations()
                             override fun onOpenLog() = switchTop(Routes.LOG)
+                            override fun onOpenTemplates() {
+                                navController.navigate(Routes.TEMPLATES) { launchSingleTop = true }
+                            }
+                            override fun onSelectLabel(label: String?) = listViewModel.onSelectLabel(label)
+                            override fun onSetLabelPaused(label: String, paused: Boolean) =
+                                listViewModel.onSetLabelPaused(label, paused)
                         },
                         modifier = Modifier.testTag("screen_list"),
+                    )
+                }
+
+                // 0.7.2: galleria dei modelli. Ogni modello entra come bozza importata e si apre l'approvazione.
+                composable(Routes.TEMPLATES) {
+                    val viewModel: TemplateGalleryViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    val importTemplateFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument(),
+                    ) { uri -> viewModel.onImportFile(uri) }
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is TemplateGalleryEvent.Message -> showMessage(event.text)
+                                is TemplateGalleryEvent.OpenDraft -> navController.navigate(Routes.detail(event.draftId))
+                                TemplateGalleryEvent.OpenList -> switchTop(Routes.LIST)
+                            }
+                        }
+                    }
+                    TemplateGalleryScreen(
+                        state = state,
+                        callbacks = object : TemplateGalleryCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onFilter(category: TemplateCategoryUi?) = viewModel.onFilter(category)
+                            override fun onUseTemplate(id: String) = viewModel.onUseTemplate(id)
+                            override fun onImportFile() {
+                                runCatching {
+                                    importTemplateFile.launch(
+                                        arrayOf(RulesBackupFormat.MIME_TYPE, "text/plain", "application/octet-stream"),
+                                    )
+                                }.onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onImportTextChange(text: String) = viewModel.onImportTextChange(text)
+                            override fun onImportText(text: String) = viewModel.onImportText(text)
+                        },
+                        modifier = Modifier.testTag("screen_templates"),
+                    )
+                }
+
+                // 0.8: System › Modes (modalità e variabili salvate).
+                composable(Routes.MODES) {
+                    val viewModel: ModesViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) { viewModel.messages.collect { showMessage(it) } }
+                    ModesScreen(
+                        state = state,
+                        callbacks = object : ModesCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onSwitchMode(name: String) = viewModel.onSwitchMode(name)
+                            override fun onAddMode(name: String) = viewModel.onAddMode(name)
+                            override fun onRenameMode(from: String, to: String) = viewModel.onRenameMode(from, to)
+                            override fun onDeleteMode(name: String) = viewModel.onDeleteMode(name)
+                            override fun onEditValue(key: String, value: String) = viewModel.onEditValue(key, value)
+                            override fun onDeleteValue(key: String) = viewModel.onDeleteValue(key)
+                        },
+                        modifier = Modifier.testTag("screen_modes"),
+                    )
+                }
+
+                // 0.8: System › Secrets. Nomi e conteggi soltanto: un valore va dal foglio alla cassaforte.
+                composable(Routes.SECRETS) {
+                    val viewModel: SecretsViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is SecretsEvent.Message -> showMessage(event.text)
+                            }
+                        }
+                    }
+                    SecretsScreen(
+                        state = state,
+                        callbacks = object : SecretsCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onSave(name: String, value: String) = viewModel.onSave(name, value)
+                            override fun onDelete(name: String) = viewModel.onDelete(name)
+                        },
+                        modifier = Modifier.testTag("screen_secrets"),
                     )
                 }
 
@@ -551,6 +720,19 @@ fun ArgusNavHost() {
                                     settingsViewModel.refresh()
                                 }
                             }
+                            override fun onRequestSendSmsPermission() {
+                                requestOutgoingTelephonyPermission(arrayOf(Manifest.permission.SEND_SMS))
+                            }
+                            override fun onRequestCallPhonePermission() {
+                                requestOutgoingTelephonyPermission(arrayOf(Manifest.permission.CALL_PHONE))
+                            }
+                            override fun onRequestCallScreeningRole() = requestCallScreeningRole()
+                            override fun onRequestContactsPermission() {
+                                requestOutgoingTelephonyPermission(arrayOf(Manifest.permission.READ_CONTACTS))
+                            }
+                            override fun onRequestCalendarPermission() {
+                                requestCalendarPermission(arrayOf(Manifest.permission.READ_CALENDAR))
+                            }
                             override fun onRemoveContact(conversationId: String) {
                                 settingsViewModel.removeContact(conversationId)
                             }
@@ -602,13 +784,33 @@ fun ArgusNavHost() {
                                     )
                                 }.onFailure { showMessage(backupPickerUnavailable) }
                             }
+                            override fun onImportTextChange(text: String) = settingsViewModel.onImportTextChange(text)
+                            override fun onImportText(text: String) = settingsViewModel.importText(text)
                             override fun onDismissBackupResult() = settingsViewModel.dismissBackupResult()
                             override fun onOpenImportedRules() {
                                 settingsViewModel.dismissBackupResult()
                                 switchTop(Routes.LIST)
                             }
+                            override fun onSubmitImportPassphrase(passphrase: String) =
+                                settingsViewModel.submitImportPassphrase(passphrase)
+                            override fun onSetAutoBackupEnabled(enabled: Boolean) =
+                                settingsViewModel.setAutoBackupEnabled(enabled)
+                            override fun onChooseAutoBackupFolder() {
+                                runCatching { chooseAutoBackupFolder.launch(null) }
+                                    .onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onSetAutoBackupFrequency(frequency: AutoBackupFrequencyUi) =
+                                settingsViewModel.setAutoBackupFrequency(frequency)
+                            override fun onSetAutoBackupPassphrase(passphrase: String) =
+                                settingsViewModel.setAutoBackupPassphrase(passphrase)
+                            override fun onRunAutoBackupNow() = settingsViewModel.runAutoBackupNow()
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onOpenModes() {
+                                navController.navigate(Routes.MODES) { launchSingleTop = true }
+                            }
+                            override fun onSetHealthAlertsEnabled(enabled: Boolean) =
+                                settingsViewModel.setHealthAlertsEnabled(enabled)
                             override fun onSetResponseTimeout(minutes: Int) =
                                 settingsViewModel.setResponseTimeout(minutes)
                             override fun onSetRootEnabled(enabled: Boolean) =
@@ -618,6 +820,9 @@ fun ArgusNavHost() {
                             override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                             override fun onRerunOnboarding() {
                                 navController.navigate(Routes.ONBOARDING)
+                            }
+                            override fun onOpenSecrets() {
+                                navController.navigate(Routes.SECRETS) { launchSingleTop = true }
                             }
                             override fun onSelectProvider(providerId: String) =
                                 settingsViewModel.selectProvider(providerId)
@@ -630,6 +835,8 @@ fun ArgusNavHost() {
                             ) = settingsViewModel.saveProviderConfig(
                                 providerId, baseUrl, model, apiKey, reasoningEffort,
                             )
+                            override fun onRemoveProviderKey(providerId: String) =
+                                settingsViewModel.removeProviderKey(providerId)
                         },
                         modifier = Modifier.testTag("screen_settings"),
                     )
@@ -641,6 +848,11 @@ fun ArgusNavHost() {
                 ) {
                     val viewModel: AutomationDetailViewModel = hiltViewModel()
                     val state by viewModel.state.collectAsStateWithLifecycle()
+                    // 0.7.2, «Condividi» → «Salva file»: lo stesso selettore di documenti dell'export.
+                    var shareStripForFile by rememberSaveable { mutableStateOf(true) }
+                    val saveShareFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.CreateDocument(RulesBackupFormat.MIME_TYPE),
+                    ) { uri -> viewModel.onSaveShareFile(uri, shareStripForFile) }
                     LaunchedEffect(viewModel) {
                         viewModel.events.collect { event ->
                             when (event) {
@@ -693,6 +905,11 @@ fun ArgusNavHost() {
                                     override fun onLoadAppChoices() = viewModel.onLoadAppChoices()
                                     override fun onChangeApp(slot: Int, packageName: String) =
                                         viewModel.onChangeApp(slot, packageName)
+                                    override fun onAddLabel(label: String) = viewModel.onAddLabel(label)
+                                    override fun onRemoveLabel(label: String) = viewModel.onRemoveLabel(label)
+                                    // 0.8: active before the first unlock (organisation, no new approval).
+                                    override fun onSetBeforeUnlock(enabled: Boolean) =
+                                        viewModel.onSetBeforeUnlock(enabled)
                                     override fun onOpenFullLog() {
                                         state.automationId?.let {
                                             switchTop(Routes.log(it, detail.name))
@@ -701,11 +918,70 @@ fun ArgusNavHost() {
                                     override fun onBack() {
                                         navController.popBackStack()
                                     }
+                                    // 0.7.2: «Condividi regola».
+                                    override fun onShare() = viewModel.onShare()
+                                    override fun onDismissShare() = viewModel.onDismissShare()
+                                    override fun onShareAsText(stripPersonalData: Boolean) {
+                                        val text = viewModel.shareText(stripPersonalData) ?: return
+                                        val send = Intent(Intent.ACTION_SEND)
+                                            .setType("text/plain")
+                                            .putExtra(Intent.EXTRA_SUBJECT, detail.name)
+                                            .putExtra(Intent.EXTRA_TEXT, text)
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                            )
+                                        }.onFailure { showMessage(systemSettingUnavailable) }
+                                    }
+                                    override fun onSaveShareFile(stripPersonalData: Boolean) {
+                                        val name = viewModel.shareFileName() ?: return
+                                        shareStripForFile = stripPersonalData
+                                        runCatching { saveShareFile.launch(name) }
+                                            .onFailure { showMessage(backupPickerUnavailable) }
+                                    }
+                                    // 0.8: dry run of this rule (or draft); nothing is executed.
+                                    override fun onDryRun() {
+                                        navController.navigate(Routes.dryRun(detail.id)) { launchSingleTop = true }
+                                    }
+                                    override fun onCopyShare(stripPersonalData: Boolean) {
+                                        val text = viewModel.shareText(stripPersonalData) ?: return
+                                        if (copySharedRule(context, shareClipLabel, text, sensitive = !stripPersonalData)) {
+                                            // Da Android 13 il sistema conferma da sé la copia.
+                                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) showMessage(shareCopied)
+                                        } else {
+                                            showMessage(systemSettingUnavailable)
+                                        }
+                                    }
                                 },
                                 modifier = Modifier.testTag("screen_detail"),
                             )
                         }
                     }
+                }
+
+                // 0.8: dry run. Sample event and answers live only in the view model's memory.
+                composable(
+                    route = Routes.DRY_RUN,
+                    arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                ) {
+                    val viewModel: DryRunViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    DryRunScreen(
+                        state = state,
+                        callbacks = object : DryRunCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onFieldChange(field: DryRunField, value: String) =
+                                viewModel.onFieldChange(field, value)
+                            override fun onVerifiedScanChange(verified: Boolean) = viewModel.onVerifiedScanChange(verified)
+                            override fun onSimulateEndChange(end: Boolean) = viewModel.onSimulateEndChange(end)
+                            override fun onRun() = viewModel.onRun()
+                            override fun onAnswer(key: String, value: String) = viewModel.onAnswer(key, value)
+                            override fun onNoAnswer(key: String) = viewModel.onNoAnswer(key)
+                        },
+                        modifier = Modifier.testTag("screen_dry_run"),
+                    )
                 }
 
                 composable(Routes.ONBOARDING) {
@@ -815,7 +1091,8 @@ fun ArgusNavHost() {
 }
 
 /**
- * Picker whitelist (P1): propone le conversazioni WhatsApp 1:1 osservate dal listener.
+ * Picker whitelist (P1): propone le conversazioni 1:1 osservate dal listener (WhatsApp e, dalla 0.8,
+ * Telegram, Signal e Google Messaggi), ciascuna con la sua app.
  * I gruppi non compaiono mai; l'inserimento manuale dell'hash resta diagnostica avanzata.
  */
 @Composable
@@ -847,7 +1124,7 @@ private fun ContactPickerDialog(
                                     .padding(vertical = 10.dp, horizontal = 4.dp),
                             ) {
                                 Text(
-                                    contact.displayName,
+                                    contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                                 Text(
@@ -870,6 +1147,22 @@ private fun ContactPickerDialog(
         },
     )
 }
+
+/**
+ * 0.7.2: copia negli appunti il testo di una regola condivisa. Il testo integrale (con chat, numeri e segreti)
+ * è marcato sensibile, così la tastiera e l'anteprima degli appunti non lo mostrano.
+ */
+private fun copySharedRule(context: android.content.Context, label: String, text: String, sensitive: Boolean): Boolean =
+    runCatching {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        val clip = android.content.ClipData.newPlainText(label, text)
+        if (sensitive) {
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+            }
+        }
+        clipboard.setPrimaryClip(clip)
+    }.isSuccess
 
 private fun maskConversationId(value: String): String =
     if (value.length <= 18) value else "${value.take(14)}…${value.takeLast(4)}"

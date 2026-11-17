@@ -1,5 +1,7 @@
 package dev.argus.automation.notification
 
+import android.content.ComponentName
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -9,7 +11,6 @@ import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.notification.ParsedNotification
-import dev.argus.engine.safety.DraftValidator
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
@@ -87,7 +88,7 @@ class NotificationIngress(
 
     private suspend fun recordObserved(parsed: ParsedNotification) {
         parsed.observedConversation
-            ?.takeIf { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
+            ?.takeIf { it.isReplyConversation() }
             ?.let { conversation ->
                 try {
                     observedConversations.record(conversation)
@@ -130,6 +131,9 @@ class ArgusNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        NotificationListenerConnection.onConnected()
+        // 0.8: notification_action agisce sulle notifiche attive attraverso questo listener.
+        ConnectedNotificationListener.attach(this)
         val active = try {
             activeNotifications?.toList() ?: emptyList<StatusBarNotification>()
         } catch (_: RuntimeException) {
@@ -152,7 +156,23 @@ class ArgusNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        NotificationListenerConnection.onDisconnected()
+        ConnectedNotificationListener.detach(this)
         ingress.clear()
         super.onListenerDisconnected()
+        // 0.7.2: il sistema (o il gestore batteria del produttore) ci ha scollegati senza revocare
+        // l'accesso: si chiede subito un nuovo collegamento. Se l'accesso è stato revocato non succede nulla.
+        rebind(this)
+    }
+
+    companion object {
+        /** Chiede al sistema di ricollegare il listener; best-effort, mai un crash. */
+        fun rebind(context: Context) {
+            try {
+                NotificationListenerService.requestRebind(ComponentName(context, ArgusNotificationListenerService::class.java))
+            } catch (error: RuntimeException) {
+                Log.w("ArgusListener", "requestRebind fallito: ${error::class.java.simpleName}")
+            }
+        }
     }
 }

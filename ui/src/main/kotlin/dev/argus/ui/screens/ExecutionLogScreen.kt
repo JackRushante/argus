@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -393,6 +394,10 @@ private fun outcomeStyle(row: LogRow): OutcomeStyle {
         -> OutcomeStyle(Icons.Rounded.PauseCircle, s.disabled.bg, s.disabled.fg, muted, squircle = true)
         AuditKind.RULE_NEEDS_REVIEW ->
             OutcomeStyle(Icons.Rounded.SyncProblem, s.needsReview.bg, s.needsReview.fg, s.needsReview.fg, squircle = true)
+        // 0.8: decisione del filtro chiamate, informativa.
+        AuditKind.CALL_SCREENED -> OutcomeStyle(Icons.Rounded.CallEnd, neutral, muted, muted, squircle = true)
+        // 0.8: the option «active before unlock» switched itself off: informative, like the lifecycle.
+        AuditKind.BEFORE_UNLOCK_OFF -> OutcomeStyle(Icons.Rounded.PauseCircle, s.disabled.bg, s.disabled.fg, muted, squircle = true)
         AuditKind.FIRED -> when (row.outcome) {
             LogOutcome.SUCCESS -> OutcomeStyle(Icons.Rounded.Check, s.armed.bg, s.armed.fg, s.armed.fg)
             LogOutcome.PARTIAL -> OutcomeStyle(Icons.Rounded.Contrast, s.pending.bg, s.pending.fg, s.pending.fg)

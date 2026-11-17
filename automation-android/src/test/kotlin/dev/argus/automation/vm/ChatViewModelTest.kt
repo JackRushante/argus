@@ -18,6 +18,11 @@ import dev.argus.brain.BridgeException
 import dev.argus.brain.TransportBackedBrain
 import dev.argus.engine.brain.CliBridgeParser
 import dev.argus.engine.model.Transition
+import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.HttpMethod
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
 import dev.argus.ui.model.NoticeKind
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
@@ -444,6 +449,28 @@ class ChatViewModelTest {
         assertEquals("other", (restoreConversationId(changedContact, base).trigger as Trigger.Notification).conversationId)
     }
 
+    @Test
+    fun `the end contact of a span never leaves the phone either`() {
+        val startId = "shortcut:com.whatsapp:start111"
+        val endId = "shortcut:com.whatsapp:end222"
+        val base = AutomationDraft(
+            name = "Silenzio finché scrive Anna",
+            trigger = Trigger.Notification("com.whatsapp", conversationId = startId, isGroup = false),
+            actions = listOf(Action.SetDnd(dev.argus.engine.model.DndMode.PRIORITY)),
+            exit = dev.argus.engine.model.ExitSpec(
+                Trigger.Notification("com.whatsapp", conversationId = endId, isGroup = false),
+            ),
+        )
+
+        val prompt = composeEditPrompt("anche il sabato", base)
+
+        assertFalse(prompt.contains(startId))
+        assertFalse(prompt.contains(endId))
+        assertTrue(prompt.contains(CURRENT_EXIT_CONTACT_PLACEHOLDER))
+        val restored = restoreConversationId(redactConversationId(base), base)
+        assertEquals(base, restored)
+    }
+
     // --- B2: un provider diretto restituisce error_code nel meta ---
 
     @Test
@@ -814,6 +841,86 @@ class ChatViewModelTest {
 
         val card = viewModel.state.value.items.filterIsInstance<ChatItem.DraftCard>().single()
         assertTrue("45.4642,9.1912" in card.rule.triggerLine, card.rule.triggerLine)
+    }
+
+    // --- Segreti: valori delle intestazioni HTTP e letterali SECRET non partono verso il modello ---
+
+    private val secretBase = AutomationDraft(
+        name = "Avvisa il server",
+        trigger = Trigger.Immediate,
+        vars = listOf(
+            VarBinding.Literal("token", "tok-segreto-literal", VarType.TEXT, ConfidentialityLabel.SECRET),
+            VarBinding.Literal("saluto", "ciao-pubblico", VarType.TEXT, ConfidentialityLabel.PUBLIC),
+        ),
+        actions = listOf(
+            Action.If(
+                condition = Condition.BooleanLiteral(true),
+                then = listOf(
+                    Action.HttpRequest(
+                        HttpMethod.POST,
+                        "https://example.com/hook",
+                        headers = mapOf("Authorization" to "Bearer sk-header-secret", "Accept" to "application/json"),
+                        body = "{}",
+                        contentType = "application/json",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    @Test
+    fun `edit prompt never carries header values or secret literals and restores them`() {
+        val prompt = composeEditPrompt("cambia l'indirizzo", secretBase)
+
+        assertFalse("sk-header-secret" in prompt, prompt)
+        assertFalse("tok-segreto-literal" in prompt, prompt)
+        assertFalse("\"Accept\":\"application/json\"" in prompt, "anche Accept è un valore di intestazione")
+        assertTrue("ciao-pubblico" in prompt, "un letterale PUBLIC resta")
+        assertTrue("\"Authorization\"" in prompt, "i nomi delle intestazioni restano")
+        assertTrue(EditSecretRedaction.PLACEHOLDER_PREFIX in prompt)
+
+        val redacted = EditSecretRedaction.redact(secretBase)
+        // Il modello cambia l'URL e lascia i segnaposto: tornano i valori veri.
+        val fromModel = redacted.draft.copy(
+            actions = redacted.draft.actions.map { action ->
+                val flow = action as Action.If
+                flow.copy(then = flow.then.map { (it as Action.HttpRequest).copy(url = "https://example.com/new") })
+            },
+        )
+        val restored = EditSecretRedaction.restore(fromModel, redacted.originals)
+        val request = (restored.actions.single() as Action.If).then.single() as Action.HttpRequest
+        assertEquals("https://example.com/new", request.url)
+        assertEquals(secretBase.vars, restored.vars)
+        assertEquals(
+            ((secretBase.actions.single() as Action.If).then.single() as Action.HttpRequest).headers,
+            request.headers,
+        )
+        // Un valore che l'utente ha chiesto di cambiare resta quello nuovo.
+        val changed = fromModel.copy(vars = listOf(VarBinding.Literal("token", "nuovo", VarType.TEXT, ConfidentialityLabel.SECRET)))
+        assertEquals("nuovo", (EditSecretRedaction.restore(changed, redacted.originals).vars.single() as VarBinding.Literal).value)
+        // Senza segreti la bozza resta la stessa istanza e il prompt non cambia.
+        val plain = AutomationDraft("x", Trigger.Immediate, listOf(Action.SetDnd(DndMode.TOTAL)))
+        assertTrue(EditSecretRedaction.redact(plain).draft === plain)
+    }
+
+    @Test
+    fun `an edit gets the secrets back in the draft that goes to approval`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val drafts = ViewModelDraftRepository()
+        val viewModel = chatViewModel(brain, drafts = drafts)
+
+        viewModel.prefillEdit(text = "cambia l'indirizzo", baseDraft = secretBase)
+        viewModel.onSend()
+        runCurrent()
+        val request = brain.removeFirst()
+        assertFalse("sk-header-secret" in request.prompt)
+
+        request.response.complete(CompileResult("Fatto.", EditSecretRedaction.redact(secretBase).draft, null))
+        advanceUntilIdle()
+
+        val saved = drafts.observeAll().first().single().draft
+        assertEquals(secretBase.vars, saved.vars)
+        assertEquals(secretBase.actions, saved.actions)
     }
 
     // ------------------------------------------------------------------ 0.3.6 · B34a: dopo un conflitto si riparte dalla versione corrente

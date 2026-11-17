@@ -19,8 +19,17 @@ data class CallStateSnapshot(
 
 interface CallStateStore {
     fun last(): CallStateSnapshot?
+
+    /** Testa della coda di consegna (al più due eventi). */
     fun pending(): TriggerEnvelope?
-    fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope? = null)
+
+    /**
+     * Persiste lo snapshot con la coda di consegna in un'unica scrittura: [next] (MISSED_CALL dopo
+     * CALL_ENDED, B12) richiede [pending] e ne prende il posto quando questo si completa.
+     */
+    fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope? = null, next: TriggerEnvelope? = null)
+
+    /** Completa la testa della coda e promuove il successivo, se c'è. */
     fun complete(eventId: String)
 }
 
@@ -63,8 +72,7 @@ class PhoneEventIngress(
     suspend fun onCallStateChanged(state: String, number: String?, atMillis: Long, sim: Int? = null) {
         lanes.run(CALL_LANE) {
             if (state !in VALID_STATES) return@run
-            val pending = callState.pending()
-            if (pending != null) deliverCall(pending)
+            deliverQueued()
             val safeAtMillis = atMillis.coerceAtLeast(0)
             val stored = callState.last()
             val previous = stored?.takeUnless {
@@ -124,33 +132,60 @@ class PhoneEventIngress(
                     )
                 else -> null
             }
-            callState.record(snapshot, envelope)
-            envelope?.let { deliverCall(it) }
             // Chiamata persa: squillo -> idle SENZA passare da OFFHOOK (nessuna risposta). Anche un
             // rifiuto manuale finisce così: con le API pubbliche non si distinguono. Si recapita dopo
-            // CALL_ENDED, che resta invariato per le regole esistenti.
-            if (state == STATE_IDLE && previous?.state == STATE_RINGING) {
-                val missed = parser.parse(
+            // CALL_ENDED, che resta invariato per le regole esistenti. Entrambi si persistono PRIMA
+            // di consegnare il primo (B12): se il processo muore durante CALL_ENDED, il recupero
+            // consegna anche MISSED_CALL.
+            val missed = if (state == STATE_IDLE && previous?.state == STATE_RINGING) {
+                parser.parse(
                     PhoneEvent.MISSED_CALL,
                     retainedNumber,
                     smsText = null,
                     atMillis = safeAtMillis,
                     sim = retainedSim,
                 )
-                if (missed != null) {
-                    callState.record(snapshot, missed)
-                    deliverCall(missed)
-                }
+            } else {
+                null
             }
+            val queue = listOfNotNull(envelope, missed)
+            callState.record(snapshot, queue.getOrNull(0), queue.getOrNull(1))
+            queue.forEach { deliverCall(it) }
+        }
+    }
+
+    /**
+     * 0.8: chiamata rifiutata dal filtro chiamate (`screen_call`). Android non la fa squillare, quindi non
+     * arriva RINGING: l'evento «chiamata in arrivo» si consegna da qui, nella stessa corsia, SENZA toccare lo
+     * stato della chiamata (non ci sarà nemmeno IDLE, e una chiamata rifiutata non è persa).
+     */
+    suspend fun onScreenedIncomingCall(number: String?, atMillis: Long) {
+        lanes.run(CALL_LANE) {
+            parser.parse(
+                PhoneEvent.INCOMING_CALL,
+                number,
+                smsText = null,
+                atMillis = atMillis.coerceAtLeast(0),
+                sim = null,
+            )?.let { dispatcher.dispatch(it) }
         }
     }
 
     /** Salta se una consegna è già in corso o accodata: chi occupa la corsia la recapita già. */
     suspend fun recoverPending(): Boolean = lanes.runIfIdle(CALL_LANE) {
-        val pending = callState.pending() ?: return@runIfIdle false
-        deliverCall(pending)
-        true
+        deliverQueued()
     } ?: false
+
+    /** Consegna la coda persistita in ordine; `true` se c'era qualcosa da consegnare. */
+    private suspend fun deliverQueued(): Boolean {
+        var delivered = false
+        repeat(MAX_QUEUED) {
+            val pending = callState.pending() ?: return delivered
+            deliverCall(pending)
+            delivered = true
+        }
+        return delivered
+    }
 
     private suspend fun deliverCall(envelope: TriggerEnvelope) {
         dispatcher.dispatch(envelope)
@@ -159,6 +194,8 @@ class PhoneEventIngress(
 
     private companion object {
         const val CALL_LANE = "call"
+        /** CALL_ENDED + MISSED_CALL: la coda persistita non supera mai due eventi. */
+        const val MAX_QUEUED = 2
         const val STATE_RINGING = "RINGING"
         const val STATE_OFFHOOK = "OFFHOOK"
         const val STATE_IDLE = "IDLE"

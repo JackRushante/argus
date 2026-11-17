@@ -25,6 +25,8 @@ import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.RoomStoredValueStore
+import dev.argus.data.RoomUserModeStore
 import dev.argus.device.DeviceController
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
@@ -71,4 +73,8 @@ interface ArgusApplicationEntryPoint {
     fun automationPauseStore(): AutomationPauseStore
     fun manualRuleRunner(): ManualRuleRunner
     fun firePolicySnapshots(): FirePolicySnapshotProvider
+
+    // 0.8 (E2E): le modalità che le regole della suite nominano e i valori conservati con la chiave `e2e_`.
+    fun userModeStore(): RoomUserModeStore
+    fun storedValueStore(): RoomStoredValueStore
 }

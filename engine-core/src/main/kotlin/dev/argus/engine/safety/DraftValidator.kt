@@ -1,8 +1,11 @@
 package dev.argus.engine.safety
 
 import dev.argus.engine.model.*
+import dev.argus.engine.runtime.CalendarTriggerPlanner
 import dev.argus.engine.runtime.CronSchedule
+import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
+import java.time.Clock
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -31,13 +34,15 @@ class DraftValidator(
     private val knownTools: Set<String>,
     private val stateKeys: Set<String> = StateKeys.ALL.keys,
     private val deniedNotificationPackages: Set<String> = setOf(ARGUS_PACKAGE),
+    /** Solo per il controllo `cron_never_fires`: un cron deve avere uno scatto nell'orizzonte da adesso. */
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     companion object {
         val FORBIDDEN_IN_INVOKE_LLM = setOf("shell.run", "app.install")
         const val FORBIDDEN_PREFIX = "automation."
         const val FORBIDDEN_PREFIX_BARE = "automation"
 
-        val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
+        val WHATSAPP_PACKAGES = ReplyChannels.WHATSAPP_PACKAGES
         val REPLY_TOOLS = setOf("whatsapp_reply")
         const val ARGUS_PACKAGE = "dev.argus"
 
@@ -48,8 +53,13 @@ class DraftValidator(
         private const val MAX_COMMAND_LENGTH = 8_192
         private const val MAX_TOOL_COUNT = 32
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
-        private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
+
+        // 0.8: condizioni di contesto e calendario. Un SSID è al massimo 32 byte, un nome Bluetooth 248.
+        private const val MAX_ZONE_ID_CHARS = 64
+        private const val MAX_SSID_CHARS = 32
+        private const val MAX_BLUETOOTH_DEVICE_CHARS = 248
+        private const val MAX_CALENDAR_FILTER_CHARS = 200
 
         /** Ritardo relativo one-shot (Trigger.Time.afterMs): da 1 secondo a 7 giorni. */
         const val MIN_DELAY_MS = 1_000L
@@ -97,6 +107,26 @@ class DraftValidator(
         if (d.actions.isEmpty()) err("no_actions", "Il draft non contiene azioni")
         if (d.cooldownMs < 0) err("cooldown_invalid", "Cooldown non può essere negativo")
 
+        // 0.8 scaffold: un tipo o un campo dietro un FeatureGate spento non si arma mai. Un errore per
+        // interruttore, col suo nome nel dettaglio (vedi FeatureGates).
+        FeatureGates.disabledIn(d).forEach { gate ->
+            errDetail("not_available_yet", "Non disponibile in questa versione", gate.wireName)
+        }
+        d.confirm?.let { confirm ->
+            if (!ConfirmPolicy.validTimeout(confirm.timeoutMs)) {
+                err(
+                    "confirm_timeout_invalid",
+                    "La conferma aspetta fra ${ConfirmPolicy.MIN_TIMEOUT_MS} e ${ConfirmPolicy.MAX_TIMEOUT_MS} ms",
+                )
+            }
+            if (!ConfirmPolicy.supportsTrigger(d.trigger)) {
+                err(
+                    "confirm_one_shot_unsupported",
+                    "Una regola che scatta una volta sola non può chiedere conferma: si spegne prima della risposta",
+                )
+            }
+        }
+
         validateTrigger(d.trigger, ::err, ::warn)
         if (d.trigger is Trigger.Sensor &&
             d.cooldownMs !in SensorTriggerPolicy.MIN_COOLDOWN_MS..SensorTriggerPolicy.MAX_COOLDOWN_MS
@@ -115,7 +145,11 @@ class DraftValidator(
 
         // --- P4 §2.5: variabili, capture, control-flow, interpolazione, budget ---
         validateVars(d.vars, d.trigger, ::err)
-        val tree = preflightActions(d.actions, ::err)
+        // 0.8: destinatario SMS legato al chiamante/mittente e forma delle regole che filtrano le chiamate.
+        validateTelephonyRule(d, ::err, ::warn)
+        val tree = preflightActions(d.actions, ::err).let { summary ->
+            summary.copy(captures = resolveInheritedConfidentiality(summary.captures, d.vars))
+        }
         if (AutomationSchema.versionFor(d) == AUTOMATION_SCHEMA_VERSION_P4 && tree.hasInvokeLlmV2) {
             err(
                 "p4_invoke_llm_v2_unsupported",
@@ -168,11 +202,23 @@ class DraftValidator(
                 )
         }
 
+        // 0.8: la fine di una regola-intervallo, con le sue azioni, si controlla come l'inizio (vedi validateSpan).
+        val exitTree = d.exit?.let { exit ->
+            validateSpan(d, exit, whitelistedIds, tree.totalActions, ::countCondition, ::err, ::warn, ::errDetail)
+        }
+
         if (conditionCount > MAX_CONDITIONS)
             err("conditions_too_many", "Massimo $MAX_CONDITIONS condizioni per regola")
 
-        if (tree.hasGenerative && d.cooldownMs < 60_000)
+        // Un'AI fra le azioni di fine conta come una d'inizio: pausa minima e avviso sui cicli.
+        if ((tree.hasGenerative || exitTree?.hasGenerative == true) && d.cooldownMs < 60_000)
             warn("cooldown_raised", "Cooldown sotto 60 s su regola generativa: l'engine imporrà 60 s")
+        if (tree.hasGenerativeInLoop || exitTree?.hasGenerativeInLoop == true)
+            warn(
+                "generative_in_loop",
+                "Chiamata AI dentro un ciclo: può ripetersi a ogni giro, fino a " +
+                    "${ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION} chiamate per scatto",
+            )
 
         return issues
     }
@@ -285,8 +331,154 @@ class DraftValidator(
                         }
                     }
                 }
+                // 0.8: la chiave ha la forma dei nomi di variabile. Il valore porta a runtime le etichette
+                // salvate; qui conta come TAINTED (VarBinding.integrity), il caso peggiore.
+                is VarBinding.Stored -> validateStoredKey(binding.key, err)
             }
         }
+    }
+
+    /**
+     * 0.8 regola-intervallo ([AutomationDraft.exit]). Il trigger di fine ha gli stessi limiti di un trigger d'inizio;
+     * le azioni di fine sono un programma a sé (le variabili dichiarate si legano all'evento di FINE, le catture
+     * dell'inizio non esistono) e si validano come quelle d'inizio, ma rispetto al trigger di FINE: è lui che preme
+     * l'interruttore di shell, macro e risposte. Le forme che il motore non saprebbe distinguere o riprendere sono
+     * rifiutate qui: inizio che si consuma da solo, fine immediata/manuale/a ora singola/DWELL, fine uguale
+     * all'inizio, due aree diverse, due trigger della stessa fase del calendario o dello stesso sensore, tag da
+     * leggere all'attivazione nella fine, domande (`ask`) fra le azioni di fine.
+     */
+    private fun validateSpan(
+        d: AutomationDraft,
+        exit: ExitSpec,
+        whitelistedIds: Set<String>,
+        startTotalActions: Int,
+        countCondition: () -> Int,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+        errDetail: (String, String, String) -> Unit,
+    ): ActionTreeSummary? {
+        val end = exit.trigger
+        if (!SpanPolicy.supportsStartTrigger(d.trigger)) {
+            err(
+                "exit_start_one_shot",
+                "Una regola che scatta una volta sola non può avere una fine: si spegnerebbe subito dopo l'inizio",
+            )
+        }
+        if (!SpanPolicy.supportsExitTrigger(end)) {
+            err(
+                "exit_trigger_unsupported",
+                "La fine non può essere immediata, manuale, a un'ora singola o un'attesa in un'area",
+            )
+        }
+        if (end == d.trigger) err("exit_trigger_same_as_start", "La fine deve avere un trigger diverso dall'inizio")
+        validateTrigger(end, err, warn)
+        if (end is Trigger.Sensor && d.trigger !is Trigger.Sensor &&
+            d.cooldownMs !in SensorTriggerPolicy.MIN_COOLDOWN_MS..SensorTriggerPolicy.MAX_COOLDOWN_MS
+        ) {
+            err(
+                "sensor_cooldown_invalid",
+                "I trigger sensore richiedono un cooldown tra " +
+                    "${SensorTriggerPolicy.MIN_COOLDOWN_MS} e ${SensorTriggerPolicy.MAX_COOLDOWN_MS} ms",
+            )
+        }
+        val start = d.trigger
+        if (start is Trigger.Geofence && end is Trigger.Geofence) {
+            val sameArea = start.lat == end.lat && start.lng == end.lng && start.radiusM == end.radiusM &&
+                start.resolveCurrentLocation == end.resolveCurrentLocation
+            val edges = end.transition != start.transition &&
+                (start.transition != Transition.DWELL || end.transition == Transition.EXIT)
+            if (!sameArea || !edges) {
+                err(
+                    "exit_geofence_mismatch",
+                    "Inizio e fine su un'area devono usare la stessa area, uno l'ingresso (o l'attesa) e l'altra l'uscita",
+                )
+            }
+        }
+        if (start is Trigger.CalendarEvent && end is Trigger.CalendarEvent && start.phase == end.phase) {
+            err("exit_calendar_same_phase", "Inizio e fine sul calendario devono essere uno l'inizio e l'altra la fine")
+        }
+        if (start is Trigger.Sensor && end is Trigger.Sensor && start.kind == end.kind) {
+            err("exit_sensor_same_kind", "Inizio e fine sui sensori devono usare due gesti diversi")
+        }
+        // Il giorno dello scatto di app_usage è uno per regola: inizio e fine non possono condividerlo.
+        if (start is Trigger.AppUsage && end is Trigger.AppUsage) {
+            err("exit_app_usage_twice", "Inizio e fine non possono essere entrambi tempi d'uso di un'app")
+        }
+        if (end is Trigger.NfcTag && end.resolveTag) {
+            err("exit_nfc_resolve_unsupported", "Il tag della fine deve essere già noto: non si legge all'attivazione")
+        }
+        if (!exit.restore && exit.actions.isEmpty()) {
+            err("exit_nothing_to_do", "La fine non rimette i valori e non ha azioni: non farebbe nulla")
+        }
+        if (exit.restore && flattenForTelephony(d.actions).none { SpanPolicy.slotOf(it) != null }) {
+            warn("exit_nothing_to_restore", "Nessuna azione d'inizio cambia un valore che la fine possa rimettere")
+        }
+        if (flattenForTelephony(exit.actions).any { it is Action.Ask }) {
+            err("exit_ask_unsupported", "Le azioni di fine non possono fare domande: la fine non aspetta risposte")
+        }
+        if (exit.actions.isEmpty()) return null
+
+        // Il programma di fine lega le variabili dichiarate all'evento di fine: un campo che quel trigger non ha
+        // fermerebbe sempre le azioni di fine.
+        val endFields = triggerPayloadFields(end)
+        d.vars.filterIsInstance<VarBinding.TriggerPayload>().filter { it.field !in endFields }.forEach { binding ->
+            err(
+                "exit_var_trigger_payload_unsupported",
+                "La variabile '${binding.name}' legge il messaggio d'inizio, che alla fine non c'è",
+            )
+        }
+        val tree = preflightActions(exit.actions, err).let { summary ->
+            summary.copy(captures = resolveInheritedConfidentiality(summary.captures, d.vars))
+        }
+        if (AutomationSchema.versionFor(d) == AUTOMATION_SCHEMA_VERSION_P4 && tree.hasInvokeLlmV2) {
+            err(
+                "p4_invoke_llm_v2_unsupported",
+                "InvokeLlm v2 non è ancora ammesso nei programmi P4; usa invoke_llm o una regola flat",
+            )
+        }
+        validateCaptureNames(tree.captures, d.vars, err)
+        if (d.vars.size + tree.captures.size > MAX_VARS) {
+            err("too_many_vars", "Massimo $MAX_VARS variabili per regola, inclusi i captureAs")
+        }
+        if (startTotalActions + tree.totalActions > MAX_TOTAL_ACTIONS) {
+            err("too_many_actions_total", "Massimo $MAX_TOTAL_ACTIONS azioni totali nell'albero appiattito")
+        }
+        val knownVars = d.vars.mapTo(mutableSetOf()) { it.name }.apply { addAll(tree.captures.map { it.name }) }
+        val declaredTypes = buildMap<String, VarType> {
+            d.vars.forEach { put(it.name, it.declaredType) }
+            tree.captures.forEach { putIfAbsent(it.name, it.type) }
+        }
+        val declaredIntegrity = buildMap<String, IntegrityLabel> {
+            d.vars.forEach { put(it.name, it.integrity) }
+            tree.captures.forEach { putIfAbsent(it.name, it.integrity) }
+        }
+        val declaredConfidentiality = buildMap<String, ConfidentialityLabel> {
+            d.vars.forEach { put(it.name, it.confidentiality) }
+            tree.captures.forEach { putIfAbsent(it.name, it.confidentiality) }
+        }
+        if (!tree.tooDeep && tree.totalActions <= MAX_TOTAL_ACTIONS) {
+            walkActions(
+                actions = exit.actions,
+                trigger = end,
+                whitelist = whitelistedIds,
+                knownVars = knownVars,
+                declaredTypes = declaredTypes,
+                declaredIntegrity = declaredIntegrity,
+                declaredConfidentiality = declaredConfidentiality,
+                availableVars = d.vars.mapTo(mutableSetOf()) { it.name },
+                depth = 0,
+                countCondition = countCondition,
+                err = err,
+                warn = warn,
+                errDetail = errDetail,
+            )
+            if (worstCaseBudgetMs(exit.actions) > MAX_TIME_BUDGET_MS)
+                err(
+                    "time_budget_exceeded",
+                    "Budget tempo worst-case oltre 6 ore: riduci maxIterations/delay o le azioni lunghe",
+                )
+        }
+        return tree
     }
 
     private fun triggerPayloadFields(trigger: Trigger): Set<TriggerField> = when (trigger) {
@@ -295,6 +487,8 @@ class DraftValidator(
             PhoneEvent.SMS_RECEIVED -> setOf(TriggerField.TEXT, TriggerField.NUMBER)
             PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL -> setOf(TriggerField.NUMBER)
         }
+        // 0.8: il titolo dell'evento (dato esterno: un invito lo scrive un altro).
+        is Trigger.CalendarEvent -> setOf(TriggerField.TITLE)
         else -> emptySet()
     }
 
@@ -303,15 +497,53 @@ class DraftValidator(
         val type: VarType = VarType.TEXT,
         val integrity: IntegrityLabel = IntegrityLabel.TAINTED,
         val confidentiality: ConfidentialityLabel,
+        /**
+         * 0.8: variabili da cui la cattura eredita la riservatezza (il body di una richiesta HTTP): se una
+         * è SECRET, o è un'altra cattura, la cattura diventa SECRET (vedi [resolveInheritedConfidentiality]).
+         */
+        val inheritsFrom: Set<String> = emptySet(),
     )
 
-    private data class ActionFrame(val action: Action, val depth: Int)
+    /**
+     * Floor statico della riservatezza delle catture che ereditano dagli input (0.8, `http_request`): SECRET
+     * se un input è un binding SECRET o una cattura SECRET. Punto fisso sulle catture (al massimo una
+     * passata per cattura): l'ordine dell'albero non conta e il risultato non è mai sotto il runtime.
+     */
+    private fun resolveInheritedConfidentiality(
+        captures: List<CaptureDeclaration>,
+        vars: List<VarBinding>,
+    ): List<CaptureDeclaration> {
+        val bindings = vars.associate { it.name to it.confidentiality }
+        var current = captures
+        repeat(captures.size) {
+            val secretCaptures = current.filter { it.confidentiality == ConfidentialityLabel.SECRET }
+                .mapTo(HashSet()) { it.name }
+            var changed = false
+            current = current.map { capture ->
+                val secretInput = capture.inheritsFrom.any {
+                    bindings[it] == ConfidentialityLabel.SECRET || it in secretCaptures
+                }
+                if (secretInput && capture.confidentiality != ConfidentialityLabel.SECRET) {
+                    changed = true
+                    capture.copy(confidentiality = ConfidentialityLabel.SECRET)
+                } else {
+                    capture
+                }
+            }
+            if (!changed) return current
+        }
+        return current
+    }
+
+    private data class ActionFrame(val action: Action, val depth: Int, val inLoop: Boolean = false)
     private data class ActionTreeSummary(
         val totalActions: Int,
         val captures: List<CaptureDeclaration>,
         val tooDeep: Boolean,
         val hasGenerative: Boolean,
         val hasInvokeLlmV2: Boolean,
+        /** Una chiamata AI dentro un `while`: può partire una volta per giro (tetto per esecuzione). */
+        val hasGenerativeInLoop: Boolean = false,
     )
 
     /** Preflight iterativo: nessuna ricorsione prima del bound profondità/numero nodi. */
@@ -326,8 +558,9 @@ class DraftValidator(
         var tooDeep = false
         var hasGenerative = false
         var hasInvokeLlmV2 = false
+        var hasGenerativeInLoop = false
         while (pending.isNotEmpty()) {
-            val (action, depth) = pending.removeFirst()
+            val (action, depth, inLoop) = pending.removeFirst()
             total = (total + 1).coerceAtMost(MAX_TOTAL_ACTIONS + 1)
             if (depth > MAX_FLOW_DEPTH) {
                 if (!tooDeep) err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
@@ -336,20 +569,24 @@ class DraftValidator(
             }
             captureDeclaration(action)?.let(captures::add)
             when (action) {
-                is Action.InvokeLlm -> hasGenerative = true
+                is Action.InvokeLlm -> {
+                    hasGenerative = true
+                    if (inLoop) hasGenerativeInLoop = true
+                }
                 is Action.InvokeLlmV2 -> {
                     hasGenerative = true
                     hasInvokeLlmV2 = true
+                    if (inLoop) hasGenerativeInLoop = true
                 }
                 is Action.If -> {
-                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
-                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
+                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
                 }
-                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop = true)) }
                 else -> Unit
             }
         }
-        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2)
+        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2, hasGenerativeInLoop)
     }
 
     private fun captureDeclaration(action: Action): CaptureDeclaration? = when (action) {
@@ -357,12 +594,44 @@ class DraftValidator(
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
         is Action.InvokeLlm -> action.captureAs?.let {
-            // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
-            // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
-            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            val output = action.output
+            if (output != null) {
+                // 0.8: una risposta vincolata è una delle etichette approvate o un intero limitato, mai
+                // testo libero del modello: CLEAN, col tipo della forma. PRIVATE come una decisione personale.
+                CaptureDeclaration(
+                    it,
+                    type = LlmOutputPolicy.varType(output),
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                )
+            } else {
+                // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
+                // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
+                CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            }
         }
         is Action.InvokeLlmV2 -> action.captureAs?.let {
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+        }
+        // 0.8: la scelta dell'utente è sempre una delle etichette approvate (letterali nel fingerprint),
+        // quindi CLEAN e PUBLIC: si confronta e si usa anche nei campi di autorità.
+        is Action.Ask -> CaptureDeclaration(
+            action.captureAs,
+            integrity = IntegrityLabel.CLEAN,
+            confidentiality = ConfidentialityLabel.PUBLIC,
+        )
+        // 0.8: la risposta di un server esterno è TAINTED. SECRET se la richiesta porta un valore della
+        // cassaforte o una variabile SECRET nel body, altrimenti PRIVATE (come il join del runtime).
+        is Action.HttpRequest -> action.captureAs?.let {
+            CaptureDeclaration(
+                it,
+                confidentiality = if (SecretPolicy.carriesSecrets(action)) {
+                    ConfidentialityLabel.SECRET
+                } else {
+                    ConfidentialityLabel.PRIVATE
+                },
+                inheritsFrom = action.body?.let { body -> InterpolationPolicy.parse(body).refs.toSet() }.orEmpty(),
+            )
         }
         else -> null
     }
@@ -619,6 +888,8 @@ class DraftValidator(
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
     ) {
+        // Visita ogni azione (anche annidata) come questo controllo: qui anche i caratteri invisibili.
+        warnInvisibleCharacters(action, warn)
         for (field in InterpolationPolicy.textFields(action)) {
             if (!InterpolationPolicy.containsInterpolation(field.value)) continue
             val parsed = InterpolationPolicy.parse(field.value)
@@ -667,18 +938,48 @@ class DraftValidator(
             // del template non è quotabile in sicurezza l'azione verrebbe bloccata: meglio dirlo ora.
             if (field.shellQuoted && !parsed.malformed) {
                 val references = InterpolationPolicy.references(field.value)
-                val contexts = ShellQuoting.contexts(field.value, references.map { it.range })
-                val unquotable = references.indices.any { index ->
+                val placements = ShellQuoting.placements(field.value, references.map { it.range })
+                val external = references.indices.filter { index ->
                     val name = references[index].name
-                    contexts[index] == ShellQuoting.Context.UNSAFE && name in knownVars &&
-                        declaredIntegrity[name] != IntegrityLabel.CLEAN
+                    name in knownVars && declaredIntegrity[name] != IntegrityLabel.CLEAN
+                }.map { placements[it] }
+                val contexts = external.mapTo(mutableSetOf()) { it.context }
+                // S3: il dato sceglierebbe il programma, o il comando lo rilegge come codice: l'azione
+                // non potrebbe mai partire, quindi è un errore.
+                if (ShellQuoting.Context.COMMAND_POSITION in contexts) {
+                    err(
+                        "interpolation_shell_command_position",
+                        "Un dato esterno è nella posizione del nome del comando: sceglierebbe quale programma parte",
+                    )
                 }
-                if (unquotable) {
+                if (ShellQuoting.Context.REEVALUATED in contexts) {
+                    err(
+                        "interpolation_shell_reevaluated",
+                        "Un dato esterno è passato a un comando che lo rilegge come codice " +
+                            "(sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono",
+                    )
+                }
+                if (ShellQuoting.Context.UNSAFE in contexts) {
                     warn(
                         "interpolation_shell_context",
                         "Un dato esterno è usato in un punto del comando shell che non si può quotare " +
-                            "in sicurezza (sostituzione di comando, backtick, here-doc o commento): " +
-                            "a runtime l'azione sarebbe bloccata",
+                            "in sicurezza (sostituzione di comando, backtick, here-doc, commento, nome di " +
+                            "variabile o numero con altro testo attaccato): a runtime l'azione sarebbe bloccata",
+                    )
+                }
+                // S2: dove la shell valuta un numero, solo un intero passa a runtime.
+                if (ShellQuoting.Context.NUMERIC in contexts) {
+                    warn(
+                        "interpolation_shell_numeric",
+                        "Un dato esterno è usato dove la shell calcola un numero: a runtime deve essere " +
+                            "un numero intero, altrimenti l'azione si blocca",
+                    )
+                }
+                if (external.any { it.optionLike }) {
+                    warn(
+                        "interpolation_shell_option",
+                        "Un dato esterno apre un argomento del comando senza un `--` prima: un valore che " +
+                            "inizia con `-` sarebbe letto come un'opzione",
                     )
                 }
             }
@@ -704,7 +1005,8 @@ class DraftValidator(
                 }
             }
         }
-        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio o notifica).
+        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio, notifica, testo
+        // letto dal telefono, uscita catturata).
         if (action is Action.WriteSetting) {
             val external = InterpolationPolicy.textFields(action)
                 .flatMap { InterpolationPolicy.parse(it.value).refs }
@@ -712,9 +1014,40 @@ class DraftValidator(
             if (external) {
                 warn(
                     "write_setting_external_value",
-                    "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+                    "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
                 )
             }
+        }
+    }
+
+    /**
+     * Caratteri che non si vedono o che cambiano la direzione del testo (categorie Cf, Zl, Zp e i
+     * controlli Cc) nei campi che danno autorità: la review mostrerebbe un comando, un indirizzo o
+     * un'impostazione diversi da quelli che girano. Nel comando shell tab e a capo sono normali.
+     */
+    private fun warnInvisibleCharacters(action: Action, warn: (String, String) -> Unit) {
+        val fields: List<Pair<String, Boolean>> = when (action) {
+            is Action.RunShell -> listOf(action.cmd to true)
+            is Action.OpenUrl -> listOf(action.url to false)
+            is Action.HttpRequest -> listOf(action.url to false) + action.headers.orEmpty().values.map { it to false }
+            is Action.WriteSetting -> listOf(action.key to false, action.value to false)
+            else -> emptyList()
+        }
+        val hidden = fields.any { (text, shell) ->
+            text.codePoints().anyMatch { code ->
+                when (Character.getType(code).toByte()) {
+                    Character.FORMAT, Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR -> true
+                    Character.CONTROL -> !(shell && (code == '\t'.code || code == '\n'.code))
+                    else -> false
+                }
+            }
+        }
+        if (hidden) {
+            warn(
+                "invisible_characters",
+                "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano " +
+                    "la direzione del testo: quello che vedi può non essere quello che viene eseguito",
+            )
         }
     }
 
@@ -729,6 +1062,8 @@ class DraftValidator(
         is Action.HttpRequest -> HTTP_ACTION_BUDGET_MS
         is Action.Speak -> SPEAK_ACTION_BUDGET_MS
         is Action.UiSteps -> UiStepsPolicy.budgetMs(action)
+        // 0.8 scaffold: la domanda aspetta la risposta fino al suo timeout.
+        is Action.Ask -> action.timeoutMs.coerceAtLeast(0)
         is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
         // Con maxIterationsVar il conteggio è ignoto a compile-time: worst-case = MAX_WHILE_ITERATIONS
@@ -764,6 +1099,14 @@ class DraftValidator(
                 trigger.cron?.let { cron ->
                     runCatching { CronSchedule.parse(cron) }
                         .onFailure { err("cron_invalid", "Cron '$cron' non valido: ${it.message}") }
+                        .onSuccess { schedule ->
+                            // Una data che non esiste (30 febbraio, 31 aprile) si armerebbe senza mai
+                            // scattare: stesso orizzonte di ricerca del motore. Con un fuso non valido
+                            // decide già tz_invalid.
+                            val zone = runCatching { ZoneId.of(trigger.tz) }.getOrNull()
+                            if (zone != null && schedule.nextFireAfter(clock.instant(), zone) == null)
+                                err("cron_never_fires", "Cron '$cron' non ha nessuno scatto: la data non esiste")
+                        }
                 }
                 trigger.at?.let { at ->
                     runCatching { LocalDateTime.parse(at) }
@@ -801,18 +1144,21 @@ class DraftValidator(
                             "lo scatto in background può arrivare con minuti di ritardo",
                     )
 
-                if (trigger.loiteringDelayMs < 0 || trigger.loiteringDelayMs > MAX_LOITERING_MS)
-                    err("loitering_invalid", "Loitering delay fuori intervallo")
-                if (trigger.transition == Transition.DWELL)
-                    err(
-                        "geofence_transition_unsupported",
-                        "Il runtime geofence supporta ENTER/EXIT; DWELL non è disponibile",
-                    )
-                if (trigger.loiteringDelayMs != 0L)
+                // 0.8: DWELL = ingresso verificato e ancora dentro dopo l'attesa (1..120 minuti); ENTER ed
+                // EXIT scattano al bordo, senza attesa.
+                if (trigger.transition == Transition.DWELL) {
+                    if (!GeofenceDwellPolicy.validDelay(trigger.loiteringDelayMs))
+                        err(
+                            "loitering_invalid",
+                            "L'attesa di un DWELL va da ${GeofenceDwellPolicy.MIN_DELAY_MS / 60_000} a " +
+                                "${GeofenceDwellPolicy.MAX_DELAY_MS / 60_000} minuti",
+                        )
+                } else if (trigger.loiteringDelayMs != 0L) {
                     err(
                         "geofence_loitering_unsupported",
-                        "Il loitering delay richiede DWELL, non disponibile nel runtime corrente",
+                        "L'attesa (loiteringDelayMs) vale solo con DWELL",
                     )
+                }
 
                 if (!trigger.resolveCurrentLocation) {
                     val valid = trigger.lat.isFinite() && trigger.lng.isFinite() &&
@@ -902,6 +1248,107 @@ class DraftValidator(
                 if (trigger.pkg.length > AppPackagePolicy.MAX_LENGTH)
                     err("package_invalid", "Package troppo lungo (massimo ${AppPackagePolicy.MAX_LENGTH})")
             }
+            // 0.8 scaffold: spenti (not_available_yet, vedi validate). Chi accende un trigger scrive qui i
+            // suoi limiti; i sensori shake e flip_face_down passano già dal ramo Sensor.
+            is Trigger.CalendarEvent -> {
+                if (trigger.offsetMinutes !in -CalendarTriggerPlanner.MAX_OFFSET_MINUTES..CalendarTriggerPlanner.MAX_OFFSET_MINUTES)
+                    err(
+                        "calendar_offset_invalid",
+                        "Offset calendario fuori da -${CalendarTriggerPlanner.MAX_OFFSET_MINUTES}.." +
+                            "${CalendarTriggerPlanner.MAX_OFFSET_MINUTES} minuti",
+                    )
+                validateCalendarFilters(trigger.titleMatch, trigger.calendar, err)
+            }
+
+            // 0.8: un id letto, oppure la lettura all'arm (resolveTag, come la posizione «qui»). Il vuoto «da
+            // completare» del backup condiviso senza lettura all'arm non si arma mai.
+            is Trigger.NfcTag -> when {
+                trigger.resolveTag && trigger.tagId.isNotEmpty() ->
+                    err("nfc_tag_ambiguous", "Un tag NFC già scritto non si rilegge all'attivazione")
+                trigger.resolveTag -> Unit
+                trigger.tagId.isBlank() -> err("nfc_tag_missing", "Tag NFC mancante: va letto all'attivazione")
+                NfcTagPolicy.normalize(trigger.tagId) == null ->
+                    err("nfc_tag_invalid", "Identificativo del tag NFC non valido")
+                else -> Unit
+            }
+
+            is Trigger.NextAlarm -> if (!NextAlarmTriggerPolicy.validOffset(trigger.offsetMinutes))
+                err(
+                    "next_alarm_offset_invalid",
+                    "Minuti prima della sveglia fra ${NextAlarmTriggerPolicy.MIN_OFFSET_MINUTES} e " +
+                        "${NextAlarmTriggerPolicy.MAX_OFFSET_MINUTES}",
+                )
+
+            is Trigger.AppUsage -> {
+                validatePackage(trigger.pkg, "pkg_blank", err)
+                if (trigger.pkg.length > AppPackagePolicy.MAX_LENGTH)
+                    err("package_invalid", "Package troppo lungo (massimo ${AppPackagePolicy.MAX_LENGTH})")
+                if (!AppUsageTriggerPolicy.validMinutes(trigger.minutes))
+                    err(
+                        "app_usage_minutes_invalid",
+                        "Minuti d'uso fra ${AppUsageTriggerPolicy.MIN_MINUTES} e ${AppUsageTriggerPolicy.MAX_MINUTES}",
+                    )
+            }
+
+            // 0.8: modalità letterale (che esista lo controlla la revisione sul telefono).
+            is Trigger.UserModeChanged -> trigger.to?.let { validateModeName(it, err) }
+        }
+    }
+
+    private fun validateStoredKey(key: String, err: (String, String) -> Unit) {
+        if (!StoredValuePolicy.validKey(key)) {
+            err("stored_key_invalid", "Chiave del valore conservato non valida: [a-z][a-z0-9_]{0,31}")
+        }
+    }
+
+    private fun validateModeName(mode: String, err: (String, String) -> Unit) {
+        if (!UserModePolicy.validLiteral(mode)) {
+            err(
+                "user_mode_name_invalid",
+                "Nome di modalità non valido: da 1 a ${UserModePolicy.MAX_NAME_CHARS} caratteri, letterale",
+            )
+        }
+    }
+
+    private fun validateStoredCompare(c: Condition.StoredCompare, err: (String, String) -> Unit) {
+        validateStoredKey(c.key, err)
+        val opAllowed = when (c.valueType) {
+            StateValueType.TEXT -> c.op in setOf(CmpOp.EQ, CmpOp.NEQ, CmpOp.CONTAINS)
+            StateValueType.NUMBER -> c.op in setOf(CmpOp.EQ, CmpOp.NEQ, CmpOp.GT, CmpOp.LT)
+            StateValueType.BOOLEAN -> c.op in setOf(CmpOp.EQ, CmpOp.NEQ)
+        }
+        val expectedValid = c.expected.length <= StoredValuePolicy.MAX_VALUE_CHARS &&
+            !InterpolationPolicy.containsInterpolation(c.expected) &&
+            (c.valueType == StateValueType.TEXT || StoredValuePolicy.canonical(c.expected, c.valueType) != null)
+        if (!opAllowed || !expectedValid) {
+            err(
+                "stored_compare_invalid",
+                "stored_compare '${c.key.take(32)}': operatore o valore atteso non adatti al tipo ${c.valueType}",
+            )
+        }
+    }
+
+    private fun validateSetStored(a: Action.SetStored, err: (String, String) -> Unit) {
+        validateStoredKey(a.key, err)
+        val valid = when (a.op) {
+            StoredOp.SET -> {
+                val value = a.value
+                value != null && value.length <= StoredValuePolicy.MAX_VALUE_CHARS &&
+                    // Un letterale tipizzato deve già essere del suo tipo; un template si controlla allo scatto.
+                    (a.valueType == null || a.valueType == StateValueType.TEXT ||
+                        InterpolationPolicy.containsInterpolation(value) ||
+                        StoredValuePolicy.canonical(value, a.valueType) != null)
+            }
+            StoredOp.INCREMENT -> a.valueType == null &&
+                (a.value == null || StoredValuePolicy.INCREMENT_LITERAL.matches(a.value))
+            StoredOp.TOGGLE, StoredOp.CLEAR -> a.value == null && a.valueType == null
+        }
+        if (!valid) {
+            err(
+                "set_stored_invalid",
+                "set_stored ${a.op}: SET vuole un valore (max ${StoredValuePolicy.MAX_VALUE_CHARS} caratteri), " +
+                    "INCREMENT al più un intero letterale, TOGGLE e CLEAR nessun valore",
+            )
         }
     }
 
@@ -968,7 +1415,48 @@ class DraftValidator(
                 if (!condition.radiusM.isFinite() || condition.radiusM <= 0 || condition.radiusM > MAX_GEOFENCE_RADIUS_M)
                     err("radius_invalid", "Raggio condizione non valido")
             }
+            // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende una condizione scrive
+            // qui i suoi limiti (un campo personale svuotato dall'export è "" e va rifiutato).
+            is Condition.Weekday ->
+                if (condition.days.isEmpty() || !validZoneId(condition.tz))
+                    err("weekday_invalid", "Giorni della settimana: almeno un giorno e un fuso IANA valido")
+
+            is Condition.WifiConnected -> condition.ssid?.let { ssid ->
+                if (!validContextText(ssid, MAX_SSID_CHARS))
+                    err("wifi_ssid_invalid", "Nome della rete Wi-Fi vuoto, troppo lungo o con caratteri di controllo")
+            }
+
+            is Condition.BluetoothConnected -> condition.device?.let { device ->
+                if (!validContextText(device, MAX_BLUETOOTH_DEVICE_CHARS))
+                    err("bluetooth_device_invalid", "Dispositivo Bluetooth vuoto, troppo lungo o con caratteri di controllo")
+            }
+
+            is Condition.HeadsetConnected -> Unit
+
+            is Condition.CalendarBusy -> validateCalendarFilters(condition.titleMatch, condition.calendar, err)
+
+            // 0.8: usabili allo scatto e dentro if/while; valore assente = UNKNOWN.
+            is Condition.StoredCompare -> validateStoredCompare(condition, err)
+
+            is Condition.UserModeIs -> validateModeName(condition.mode, err)
         }
+    }
+
+    // --- 0.8: condizioni di contesto e trigger del calendario ---------------------------------------
+
+    private fun validZoneId(tz: String): Boolean =
+        tz.length <= MAX_ZONE_ID_CHARS && runCatching { ZoneId.of(tz) }.isSuccess
+
+    /**
+     * Un filtro di testo letterale: non vuoto (il PersonalDataStripper lascia "" da completare), limitato,
+     * senza caratteri di controllo.
+     */
+    private fun validContextText(value: String, maxChars: Int): Boolean =
+        value.isNotBlank() && value.length <= maxChars && value.none(Char::isISOControl)
+
+    private fun validateCalendarFilters(titleMatch: String?, calendar: String?, err: (String, String) -> Unit) {
+        if (listOfNotNull(titleMatch, calendar).any { !validContextText(it, MAX_CALENDAR_FILTER_CHARS) })
+            err("calendar_filter_invalid", "Filtro del calendario vuoto, troppo lungo o con caratteri di controllo")
     }
 
     private fun validateStateCondition(c: Condition.StateEquals, err: (String, String) -> Unit) {
@@ -1023,8 +1511,13 @@ class DraftValidator(
             is Action.LaunchApp -> if (!InterpolationPolicy.containsInterpolation(action.pkg)) {
                 validatePackage(action.pkg, "package_invalid", err)
             }
-            is Action.OpenUrl -> if (!InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url))
-                err("url_invalid", "URL non valido o schema non consentito")
+            is Action.OpenUrl -> when {
+                // `https://banca.example@altro.example/` si legge come la banca ma apre l'altro host.
+                urlHasUserInfo(action.url) ->
+                    err("url_userinfo", "L'URL contiene un nome o credenziali prima di @: non è ammesso")
+                !InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url) ->
+                    err("url_invalid", "URL non valido o schema non consentito")
+            }
             is Action.ShowNotification -> {
                 validateRequiredText(action.title, 120, "title_invalid", err)
                 // Il corpo può restare vuoto (notifica di solo titolo, come ammette il bridge):
@@ -1037,7 +1530,7 @@ class DraftValidator(
             is Action.InputText -> validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
             is Action.WhatsAppReply -> {
                 validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
-                validateReplyTarget(trigger, whitelist, err)
+                validateReplyTarget(trigger, whitelist, err, ReplyKind.WHATSAPP)
             }
             is Action.RunShell -> {
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
@@ -1124,7 +1617,10 @@ class DraftValidator(
             is Action.WriteSetting -> {
                 // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via
                 // WriteSettingPolicy: key stile QUERY_NAME, value bounded, control char rifiutati.
-                if (!InterpolationPolicy.containsInterpolation(action.key) && !WriteSettingPolicy.validKey(action.key))
+                // S7: la chiave è sempre letterale, così il controllo "alto impatto" vede quella vera.
+                if (InterpolationPolicy.containsInterpolation(action.key))
+                    err("write_setting_key_interpolated", "La chiave dell'impostazione deve essere letterale, senza variabili")
+                else if (!WriteSettingPolicy.validKey(action.key))
                     err("write_setting_key_invalid", "Chiave impostazione non valida (forma/limite)")
                 if (!InterpolationPolicy.containsInterpolation(action.value) && !WriteSettingPolicy.validValue(action.value))
                     err(
@@ -1141,7 +1637,8 @@ class DraftValidator(
                     warn(
                         "write_setting_high_impact",
                         "Questa regola cambia un'impostazione di sicurezza del telefono (debug, " +
-                            "accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+                            "accessibilità, tastiera, verifica delle app, accesso alle notifiche, " +
+                            "compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
                     )
                 }
             }
@@ -1157,7 +1654,7 @@ class DraftValidator(
                 }
             }
             is Action.SetRotation -> Unit // solo booleano, nulla da validare
-            is Action.HttpRequest -> validateHttpRequest(action, err)
+            is Action.HttpRequest -> validateHttpRequest(action, err, warn)
             // 0.5.1: azioni privilegiate tipizzate. Solo booleani/nessun campo: nulla da validare.
             is Action.SetAirplane,
             is Action.SetLocation,
@@ -1174,23 +1671,207 @@ class DraftValidator(
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
             // ricorsione sono gestiti da walkActions (che ha lo scope var). Qui nessun campo foglia.
             is Action.If, is Action.While -> Unit
+            // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende un'azione scrive qui
+            // i suoi limiti; i campi letterali (numeri, chiavi, etichette) non devono contenere `${'$'}{`.
+            is Action.Ask -> validateAsk(action, err)
+
+            is Action.SetStored -> validateSetStored(action, err)
+
+            // 0.8: modalità letterale; che esista lo controlla la revisione sul telefono (e lo scatto).
+            is Action.SetUserMode -> validateModeName(action.mode, err)
+
+            is Action.NotificationReply -> {
+                validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
+                validateReplyTarget(trigger, whitelist, err, ReplyKind.NOTIFICATION)
+            }
+
+            is Action.NotificationAction -> validateNotificationAction(action, trigger, err, warn)
+
+            is Action.SendSms -> validateSendSms(action, err, warn)
+
+            is Action.CallNumber -> validateCallNumber(action, err, warn)
+
+            is Action.SendIntent -> validateSendIntent(action, err)
+
+            // Trigger, posizione e condizioni ammesse: validateTelephonyRule (serve la regola intera).
+            is Action.ScreenCall -> Unit
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 0.8: send_sms, call_number, send_intent, screen_call (TelephonyActionPolicy)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Numero letterale valido oppure UN segnaposto (il legame col chiamante/mittente lo controlla
+     * [validateTelephonyRule]); testo non vuoto e al massimo 480 caratteri. Sempre l'avviso sul costo; uno
+     * più forte quando il destinatario viene da chi ha chiamato o scritto.
+     */
+    private fun validateSendSms(action: Action.SendSms, err: (String, String) -> Unit, warn: (String, String) -> Unit) {
+        val fromSender = TelephonyActionPolicy.placeholder(action.number) != null
+        when {
+            fromSender -> Unit
+            InterpolationPolicy.containsInterpolation(action.number) ->
+                err(
+                    "sms_number_template_invalid",
+                    "Il destinatario dell'SMS è un numero oppure solo \${variabile} col numero di chi ha chiamato o scritto",
+                )
+            !TelephonyActionPolicy.isValidNumber(action.number) ->
+                err("sms_number_invalid", "Numero dell'SMS non valido: + facoltativo e da 7 a 15 cifre")
+        }
+        if (action.text.isBlank() || action.text.length > TelephonyActionPolicy.MAX_SMS_CHARS) {
+            err("sms_text_invalid", "Testo dell'SMS vuoto o oltre ${TelephonyActionPolicy.MAX_SMS_CHARS} caratteri")
+        }
+        warn("sms_cost", "Inviare SMS può costare. Al massimo 10 SMS l'ora in tutto e 3 l'ora allo stesso numero")
+        if (fromSender) {
+            warn(
+                "sms_to_caller",
+                "Il destinatario è chi ha chiamato o scritto: il numero si può falsificare, quindi un estraneo può " +
+                    "far mandare SMS al numero che sceglie",
+            )
+        }
+    }
+
+    private fun validateCallNumber(action: Action.CallNumber, err: (String, String) -> Unit, warn: (String, String) -> Unit) {
+        if (!TelephonyActionPolicy.isValidNumber(action.number)) {
+            err("call_number_invalid", "Numero da chiamare non valido: solo + facoltativo e da 7 a 15 cifre, letterale")
+        }
+        warn("call_cost", "Una chiamata può costare. Al massimo 3 chiamate l'ora")
+    }
+
+    private fun validateSendIntent(action: Action.SendIntent, err: (String, String) -> Unit) {
+        TelephonyActionPolicy.intentProblems(action).forEach { code ->
+            when (code) {
+                TelephonyActionPolicy.INTENT_TARGET_MISSING ->
+                    err("intent_target_missing", "Serve l'azione dell'Intent oppure pacchetto e classe insieme")
+                TelephonyActionPolicy.INTENT_SERVICE_NEEDS_COMPONENT ->
+                    err("intent_service_needs_component", "Per avviare un servizio servono pacchetto e classe")
+                TelephonyActionPolicy.INTENT_NAME_INVALID ->
+                    err("intent_name_invalid", "Azione, pacchetto, classe o tipo MIME non validi o con caratteri di controllo")
+                TelephonyActionPolicy.INTENT_TARGET_FORBIDDEN ->
+                    err("intent_target_forbidden", "Un Intent non può essere rivolto ad Argus stesso")
+                TelephonyActionPolicy.INTENT_ACTION_FORBIDDEN ->
+                    err("intent_action_forbidden", "Azione vietata: chiamare, installare, disinstallare, cancellare o resettare")
+                TelephonyActionPolicy.INTENT_DATA_INVALID ->
+                    err("intent_data_invalid", "Dati (URI) dell'Intent vuoti, non validi, troppo lunghi o con variabili")
+                TelephonyActionPolicy.INTENT_DATA_SCHEME_FORBIDDEN ->
+                    err("intent_data_scheme_forbidden", "Schema dei dati vietato: file, javascript o intent")
+                TelephonyActionPolicy.INTENT_TOO_MANY_EXTRAS ->
+                    err("intent_too_many_extras", "Al massimo ${TelephonyActionPolicy.MAX_INTENT_EXTRAS} extra")
+                else ->
+                    err("intent_extra_invalid", "Extra con nome non valido o doppio, oppure valore vuoto o non del suo tipo")
+            }
         }
     }
 
     /**
+     * Controlli che vedono la regola intera:
+     *  - il destinatario `${'$'}{var}` di un SMS è una variabile `trigger_payload` sul campo NUMBER, senza regex (il
+     *    numero di chi ha chiamato o scritto, così com'è);
+     *  - un extra STRING di un Intent riempito con un dato esterno: avviso;
+     *  - `screen_call` (al più una, fra le azioni principali, mai in if/while o tra le azioni d'uscita) richiede
+     *    il trigger «chiamata in arrivo» senza filtro SIM, niente conferma né uscita, e condizioni che si
+     *    calcolano con il solo orologio ([TelephonyActionPolicy.isScreeningCondition]): la decisione va data
+     *    prima che il telefono squilli.
+     */
+    private fun validateTelephonyRule(
+        d: AutomationDraft,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        val all = flattenForTelephony(d.actions + d.exit?.actions.orEmpty())
+        val bindings = d.vars.associateBy { it.name }
+        // 0.8: un SMS fra le azioni di fine risponde a chi ha fatto scattare la FINE: conta il trigger di fine.
+        val byTrigger = listOf(d.trigger to flattenForTelephony(d.actions)) +
+            listOfNotNull(d.exit?.let { it.trigger to flattenForTelephony(it.actions) })
+        byTrigger.flatMap { (trigger, actions) -> actions.filterIsInstance<Action.SendSms>().map { trigger to it } }
+            .forEach { (trigger, sms) ->
+            val name = TelephonyActionPolicy.placeholder(sms.number) ?: return@forEach
+            val binding = bindings[name] as? VarBinding.TriggerPayload
+            if (binding == null || binding.field != TriggerField.NUMBER || binding.extractionRegex != null ||
+                trigger !is Trigger.PhoneState
+            ) {
+                err(
+                    "sms_number_not_sender",
+                    "Il destinatario \${$name} deve essere il numero di chi ha chiamato o scritto (trigger_payload NUMBER)",
+                )
+            }
+        }
+        val cleanVars = d.vars.filter { it.integrity == IntegrityLabel.CLEAN }.mapTo(mutableSetOf()) { it.name }
+        val externalExtra = all.filterIsInstance<Action.SendIntent>().any { intent ->
+            intent.extras.any { extra ->
+                extra.type == IntentExtraType.STRING &&
+                    InterpolationPolicy.parse(extra.value).refs.any { it !in cleanVars }
+            }
+        }
+        if (externalExtra) {
+            warn(
+                "intent_extra_external_value",
+                "Un extra dell'Intent arriva da un dato esterno (messaggio, notifica o testo letto dal telefono)",
+            )
+        }
+
+        val topLevel = d.actions.count { it is Action.ScreenCall }
+        val total = all.count { it is Action.ScreenCall }
+        if (total == 0) return
+        if (total > topLevel) {
+            err("screen_call_nested", "Il filtro chiamate va tra le azioni principali, non in if/while o nell'uscita")
+        }
+        if (topLevel > 1) err("screen_call_duplicate", "Al massimo un filtro chiamate per regola")
+        val trigger = d.trigger
+        if (trigger !is Trigger.PhoneState || trigger.event != PhoneEvent.INCOMING_CALL) {
+            err("screen_call_trigger", "Il filtro chiamate richiede il trigger «chiamata in arrivo»")
+        } else if (trigger.sim != null) {
+            err("screen_call_sim_filter", "Il filtro chiamate non ammette il filtro SIM")
+        }
+        if (d.confirm != null || d.exit != null) {
+            err("screen_call_confirm_exit", "Il filtro chiamate decide subito: niente conferma né regola-intervallo")
+        }
+        if (d.conditions?.let(TelephonyActionPolicy::isScreeningCondition) == false) {
+            err(
+                "screen_call_condition_slow",
+                "Con il filtro chiamate sono ammesse solo condizioni di orario e giorno della settimana",
+            )
+        }
+    }
+
+    /** Tutte le azioni, annidate comprese, con un tetto: l'albero non è ancora validato. */
+    private fun flattenForTelephony(actions: List<Action>): List<Action> {
+        val out = mutableListOf<Action>()
+        val pending = ArrayDeque(actions)
+        while (pending.isNotEmpty() && out.size <= MAX_TOTAL_ACTIONS * 4) {
+            val action = pending.removeFirst()
+            out += action
+            when (action) {
+                is Action.If -> {
+                    pending.addAll(action.then)
+                    pending.addAll(action.orElse)
+                }
+                is Action.While -> pending.addAll(action.body)
+                else -> Unit
+            }
+        }
+        return out
+    }
+
+    /**
      * `http_request` (0.4.1). URL e intestazioni sono LETTERALI: un segnaposto lì è un errore, perché i
-     * dati esterni possono entrare solo nel body. https obbligatorio (http solo verso loopback),
+     * dati esterni possono entrare solo nel body. https obbligatorio (http solo loopback o rete locale, 0.8),
      * nessun userinfo; al massimo 10 intestazioni con nomi validi, senza `Host`, `Content-Length`,
      * `Transfer-Encoding`, `Connection`; body fino a 16 KB. Le stesse regole valgono a runtime
      * ([HttpRequestPolicy.isResolvedShapeValid]).
      */
-    private fun validateHttpRequest(action: Action.HttpRequest, err: (String, String) -> Unit) {
+    private fun validateHttpRequest(
+        action: Action.HttpRequest,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
         if (InterpolationPolicy.containsInterpolation(action.url)) {
             err("http_url_interpolated", "L'URL della richiesta HTTP è letterale: niente \${…}")
         } else if (!HttpRequestPolicy.isUrlAllowed(action.url)) {
             err(
                 "http_url_invalid",
-                "URL non valido: serve https:// (http:// solo per localhost), senza utente:password",
+                "URL non valido: serve https:// (http:// solo su questo telefono o sulla rete locale), senza utente:password",
             )
         }
 
@@ -1205,16 +1886,24 @@ class DraftValidator(
             err("http_header_interpolated", "Le intestazioni sono letterali: niente \${…}")
         } else {
             val lowerNames = headers.keys.map { it.lowercase(java.util.Locale.ROOT) }
+            // I caratteri non ASCII hanno un codice loro (0.7.2): il client HTTP li rifiuta a ogni scatto.
+            val notAscii = headers.values.any(HttpRequestPolicy::hasNonAsciiChars)
             val invalid = headers.any { (name, value) ->
                 !HttpRequestPolicy.isHeaderNameValid(name) ||
                     HttpRequestPolicy.isHeaderNameForbidden(name) ||
-                    !HttpRequestPolicy.isHeaderValueValid(value)
+                    (!HttpRequestPolicy.isHeaderValueValid(value) && !HttpRequestPolicy.hasNonAsciiChars(value))
             }
             if (invalid || lowerNames.size != lowerNames.toSet().size) {
                 err(
                     "http_header_invalid",
                     "Intestazione non valida (nome, valore vuoto o con caratteri di controllo, " +
                         "duplicata, o vietata: Host, Content-Length, Transfer-Encoding, Connection)",
+                )
+            }
+            if (notAscii) {
+                err(
+                    "http_header_not_ascii",
+                    "Valore di intestazione con caratteri non ASCII (lettere accentate, virgolette tipografiche, emoji)",
                 )
             }
         }
@@ -1238,6 +1927,81 @@ class DraftValidator(
             if (HttpRequestPolicy.bodyBytes(body) > HttpRequestPolicy.MAX_BODY_BYTES) {
                 err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
             }
+        }
+        validateHttpCapture(action, err)
+        validateHttpSecrets(action, err)
+        // 0.8: `http://` sulla rete dell'utente è ammesso ma viaggia in chiaro. Con un valore della
+        // cassaforte è un errore (fuori dal loopback il segreto non viaggia mai in chiaro).
+        if (!InterpolationPolicy.containsInterpolation(action.url) &&
+            HttpRequestPolicy.isUrlAllowed(action.url) &&
+            HttpRequestPolicy.isCleartextOnLocalNetwork(action.url)
+        ) {
+            if (SecretPolicy.carriesSecrets(action)) {
+                err(
+                    "http_cleartext_secret",
+                    "Un segreto non viaggia senza cifratura: per la rete locale serve https://",
+                )
+            } else {
+                warn("http_cleartext_local", "La richiesta viaggia senza cifratura sulla tua rete")
+            }
+        }
+    }
+
+    /** 0.8: `captureAs` (nome di variabile) ed `extract` (puntatore JSON letterale, solo con la cattura). */
+    private fun validateHttpCapture(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        val extract = action.extract ?: return
+        if (action.captureAs == null) {
+            err("http_extract_without_capture", "extract serve solo con captureAs")
+        }
+        if (!HttpCapturePolicy.isPointerValid(extract)) {
+            err(
+                "http_extract_invalid",
+                "Puntatore JSON non valido: inizia con /, al massimo ${HttpCapturePolicy.MAX_POINTER_CHARS} " +
+                    "caratteri, ~ solo come ~0 o ~1, niente \${…}",
+            )
+        }
+    }
+
+    /**
+     * 0.8: intestazioni e parametri dalla cassaforte. La regola porta solo nomi: nome del segreto
+     * `[a-z][a-z0-9_]{0,31}`, nome dell'intestazione con le regole di quelle letterali, prefisso letterale.
+     * Che il segreto esista lo controlla l'approvazione sul telefono (`secret_missing`), non il validatore.
+     */
+    private fun validateHttpSecrets(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        val secretHeaders = action.secretHeaders.orEmpty()
+        val secretQuery = action.secretQuery.orEmpty()
+        if (secretHeaders.isEmpty() && secretQuery.isEmpty()) return
+        if (action.headers.orEmpty().size + secretHeaders.size > HttpRequestPolicy.MAX_HEADERS ||
+            secretQuery.size > HttpRequestPolicy.MAX_SECRET_QUERY
+        ) {
+            err(
+                "http_secrets_too_many",
+                "Massimo ${HttpRequestPolicy.MAX_HEADERS} intestazioni in tutto e " +
+                    "${HttpRequestPolicy.MAX_SECRET_QUERY} parametri segreti",
+            )
+        }
+        val refs = secretHeaders + secretQuery
+        if (refs.any { !SecretPolicy.isNameValid(it.secret) }) {
+            err("secret_name_invalid", "Nome del segreto non valido: [a-z][a-z0-9_]{0,31}")
+        }
+        val badHeader = secretHeaders.any { ref ->
+            !HttpRequestPolicy.isHeaderNameValid(ref.name) || HttpRequestPolicy.isHeaderNameForbidden(ref.name) ||
+                ref.name.lowercase(java.util.Locale.ROOT) == HttpRequestPolicy.CONTENT_TYPE_HEADER
+        }
+        val badQuery = secretQuery.any { !HttpRequestPolicy.isSecretQueryValid(it.copy(secret = "x")) }
+        val badPrefix = refs.any { !HttpRequestPolicy.isSecretPrefixValid(it.prefix) }
+        if (badHeader || badQuery || badPrefix || HttpRequestPolicy.secretQueryDuplicates(action)) {
+            err(
+                "http_secret_ref_invalid",
+                "Intestazione o parametro segreto non valido (nome, duplicato, Content-Type, o prefisso " +
+                    "oltre ${HttpRequestPolicy.MAX_SECRET_PREFIX_CHARS} caratteri o con \${…})",
+            )
+        }
+        if (HttpRequestPolicy.secretHeaderConflicts(action)) {
+            err(
+                "http_secret_header_conflict",
+                "Un'intestazione segreta ha lo stesso nome di un'altra intestazione",
+            )
         }
     }
 
@@ -1498,7 +2262,7 @@ class DraftValidator(
         }
         if (replyTargetSender) {
             if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
-            validateReplyTarget(trigger, whitelist, err)
+            validateReplyTarget(trigger, whitelist, err, ReplyKind.GENERATIVE)
         }
     }
 
@@ -1521,6 +2285,31 @@ class DraftValidator(
                 validateInvokeLlmNotificationDeliver(action, err)
             GenerativeDeliverMode.CAPTURE_ONLY ->
                 validateInvokeLlmCaptureOnly(action, err)
+        }
+
+        // 0.8: uscita vincolata, solo per una chiamata che cattura in una variabile.
+        action.output?.let { output ->
+            // Codici letterali (li legge la copertura dei testi della UI), uno per problema della forma.
+            when (LlmOutputPolicy.specProblem(output)) {
+                null -> if (!LlmOutputPolicy.constrainedGoalFits(action.goal, output, MAX_TEXT_LENGTH)) {
+                    err("goal_invalid", "Il goal con l'istruzione della forma supera $MAX_TEXT_LENGTH caratteri")
+                }
+                "llm_output_choices_invalid" ->
+                    err("llm_output_choices_invalid", "Da 2 a 8 etichette uniche [a-z0-9_-]{1,24}")
+                "llm_output_choices_forbidden" ->
+                    err("llm_output_choices_forbidden", "Solo una risposta CHOICE ha etichette")
+                "llm_output_bounds_required" ->
+                    err("llm_output_bounds_required", "Una risposta NUMBER richiede min e max")
+                "llm_output_bounds_invalid" ->
+                    err("llm_output_bounds_invalid", "min non oltre max, entro ±${LlmOutputPolicy.MAX_ABS_NUMBER}")
+                else -> err("llm_output_bounds_forbidden", "Solo una risposta NUMBER ha min e max")
+            }
+            if (action.captureAs == null || action.deliver != GenerativeDeliverMode.CAPTURE_ONLY) {
+                err(
+                    "llm_output_requires_capture",
+                    "Una risposta vincolata si cattura in una variabile (CAPTURE_ONLY con captureAs)",
+                )
+            }
         }
 
         // Difesa in profondità per-tool + timeout: valgono per tutti i sink (web.search è in
@@ -1603,7 +2392,7 @@ class DraftValidator(
             err("reply_target_unbound", "Un tool di reply deve essere vincolato al mittente del trigger")
         if (action.replyTargetSender) {
             if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
-            validateReplyTarget(trigger, whitelist, err)
+            validateReplyTarget(trigger, whitelist, err, ReplyKind.GENERATIVE)
         }
 
         if (action.allowedTools.any { it.startsWith("screen.") || it == "state.read" } && hasReplyTool)
@@ -1640,18 +2429,35 @@ class DraftValidator(
             err("context_sources_duplicated", "Context sources duplicate in InvokeLlm")
     }
 
+    /** Chi risponde: `whatsapp_reply`, `notification_reply` (0.8) o l'AI (entrambe le famiglie). */
+    private enum class ReplyKind { WHATSAPP, NOTIFICATION, GENERATIVE }
+
     private fun validateReplyTarget(
         trigger: Trigger,
         whitelist: Set<String>,
         err: (String, String) -> Unit,
+        kind: ReplyKind,
     ) {
         val notification = trigger as? Trigger.Notification
         if (notification == null) {
             err("reply_target_no_notification", "Reply richiede un trigger Notification")
             return
         }
-        if (notification.pkg !in WHATSAPP_PACKAGES)
-            err("reply_wrong_package", "WhatsAppReply richiede un package WhatsApp riconosciuto")
+        val pkg = notification.pkg
+        val packageAllowed = when (kind) {
+            ReplyKind.WHATSAPP -> ReplyChannels.isWhatsApp(pkg)
+            ReplyKind.NOTIFICATION -> ReplyChannels.isNotificationReplyPackage(pkg)
+            ReplyKind.GENERATIVE -> ReplyChannels.isReplyPackage(pkg)
+        }
+        when {
+            packageAllowed -> Unit
+            kind != ReplyKind.WHATSAPP && pkg in ReplyChannels.REFUSED_PACKAGES ->
+                err("reply_app_unsupported", "App di messaggi senza una chiave di conversazione affidabile")
+            kind == ReplyKind.NOTIFICATION ->
+                err("reply_wrong_package", "notification_reply richiede Telegram, Signal o Google Messaggi (WhatsApp usa whatsapp_reply)")
+            else ->
+                err("reply_wrong_package", "WhatsAppReply richiede un package WhatsApp riconosciuto")
+        }
         if (notification.isGroup != false)
             err("reply_target_group", "Reply automatiche solo su chat 1:1 verificata")
         val conversationId = notification.conversationId
@@ -1659,6 +2465,56 @@ class DraftValidator(
             err("reply_needs_conversation_id", "Reply automatiche richiedono conversationId")
         else if (conversationId !in whitelist)
             err("target_not_whitelisted", "Conversazione non in whitelist")
+        // Fuori da WhatsApp la chat è solo lo shortcut di conversazione della STESSA app (ReplyChannels).
+        if (packageAllowed && !conversationId.isNullOrBlank() &&
+            !ReplyChannels.isStableConversation(pkg, conversationId)
+        ) err("reply_conversation_unstable", "La conversazione non è lo shortcut di conversazione dell'app")
+    }
+
+    /**
+     * `notification_action` (0.8): agisce sulla notifica del trigger. CLICK preme il pulsante col testo
+     * approvato: mai su Argus né sulle app vietate alle macro, ed è sempre segnalato in revisione.
+     */
+    private fun validateNotificationAction(
+        action: Action.NotificationAction,
+        trigger: Trigger,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        val notification = trigger as? Trigger.Notification
+        if (notification == null)
+            err("notification_action_no_notification", "notification_action richiede un trigger Notification")
+        NotificationActionPolicy.problems(action).forEach { problem ->
+            when (problem) {
+                NotificationActionPolicy.Problem.LABEL_MISSING,
+                NotificationActionPolicy.Problem.LABEL_UNEXPECTED,
+                NotificationActionPolicy.Problem.LABEL_INVALID,
+                -> err(
+                    "notification_action_label_invalid",
+                    "CLICK richiede il testo del pulsante (1..${NotificationActionPolicy.MAX_LABEL_CHARS} " +
+                        "caratteri, una riga); DISMISS e SNOOZE non ne hanno",
+                )
+                NotificationActionPolicy.Problem.LABEL_INTERPOLATED ->
+                    err("notification_action_label_interpolated", "Il testo del pulsante è letterale, senza variabili")
+                NotificationActionPolicy.Problem.SNOOZE_MISSING,
+                NotificationActionPolicy.Problem.SNOOZE_UNEXPECTED,
+                NotificationActionPolicy.Problem.SNOOZE_RANGE,
+                -> err(
+                    "notification_action_snooze_invalid",
+                    "SNOOZE richiede snoozeMinutes tra ${NotificationActionPolicy.MIN_SNOOZE_MINUTES} e " +
+                        "${NotificationActionPolicy.MAX_SNOOZE_MINUTES}; le altre operazioni non lo usano",
+                )
+            }
+        }
+        if (action.op == NotificationActionOp.CLICK) {
+            if (notification != null && NotificationActionPolicy.isForbiddenTarget(notification.pkg))
+                err("notification_action_forbidden_app", "Non si premono pulsanti nelle notifiche di questa app")
+            warn(
+                "notification_click_review",
+                "Argus premerà per te il pulsante «${action.label.orEmpty()}» della notifica di " +
+                    "${notification?.pkg.orEmpty()}",
+            )
+        }
     }
 
     private fun validatePackage(value: String, blankCode: String, err: (String, String) -> Unit) {
@@ -1671,12 +2527,43 @@ class DraftValidator(
             err(code, "Campo testuale vuoto o troppo lungo")
     }
 
+    /**
+     * `ask` (0.8): domanda di al massimo [AskPolicy.MAX_PROMPT_CHARS] caratteri (anche dopo
+     * l'interpolazione, ricontrollata a runtime), da 2 a 4 scelte letterali uniche di 1..24 caratteri,
+     * attesa da 10 s a 60 min, scelta predefinita fra quelle approvate.
+     */
+    private fun validateAsk(action: Action.Ask, err: (String, String) -> Unit) {
+        if (!AskPolicy.validResolvedPrompt(action.prompt)) {
+            err("ask_prompt_invalid", "Domanda obbligatoria, al massimo ${AskPolicy.MAX_PROMPT_CHARS} caratteri")
+        }
+        if (!AskPolicy.validChoices(action.choices)) {
+            err(
+                "ask_choices_invalid",
+                "Da ${AskPolicy.MIN_CHOICES} a ${AskPolicy.MAX_CHOICES} scelte uniche di 1..${AskPolicy.MAX_CHOICE_CHARS} " +
+                    "caratteri, senza caratteri di controllo né segnaposto",
+            )
+        }
+        if (!AskPolicy.validTimeout(action.timeoutMs)) {
+            err("ask_timeout_invalid", "L'attesa della risposta va da 10 secondi a 60 minuti")
+        }
+        if (!AskPolicy.validDefault(action)) {
+            err("ask_default_invalid", "La scelta predefinita deve essere una delle scelte")
+        }
+    }
+
     private fun validateRequiredText(value: String, max: Int, code: String, err: (String, String) -> Unit) {
         if (value.isBlank() || value.length > max) err(code, "Campo obbligatorio, massimo $max caratteri")
     }
 
     private fun validHttpUrl(raw: String): Boolean = runCatching {
         val uri = URI(raw)
-        uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
+        uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.rawUserInfo == null
     }.getOrDefault(false)
+
+    /** Una `@` letterale nell'autorità del template (tra `://` e il primo `/`, `?` o `#`). */
+    private fun urlHasUserInfo(template: String): Boolean {
+        val start = template.indexOf("://").takeIf { it >= 0 }?.plus(3) ?: return false
+        val end = template.indexOfAny(charArrayOf('/', '?', '#'), start).takeIf { it >= 0 } ?: template.length
+        return '@' in template.substring(start, end)
+    }
 }

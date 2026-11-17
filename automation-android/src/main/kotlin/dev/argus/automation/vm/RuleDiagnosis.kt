@@ -10,7 +10,9 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.ActiveSpan
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.ui.model.DiagnosisFix
 import dev.argus.ui.model.DiagnosisLevel
 import dev.argus.ui.model.DiagnosisRow
@@ -36,6 +38,8 @@ internal data class DiagnosisInputs(
     val geofence: PersistedGeofenceRegistration?,
     /** Eventi della regola già caricati dal Dettaglio, dal più recente. */
     val log: List<AuditLogRecord>,
+    /** 0.8: l'intervallo in corso della regola (`SpanStore.get(id)`), null se non è in corso. */
+    val span: ActiveSpan? = null,
 )
 
 /** Eventi che raccontano un tentativo fallito o soppresso: candidati alla riga «Ultimo tentativo». */
@@ -70,7 +74,30 @@ internal fun buildRuleDiagnosis(
                 addAll(alarmRows(automation, trigger, inputs.alarm, nowMillis, language))
             }
             is Trigger.Geofence -> if (active) add(areaRow(automation, inputs.geofence, language))
+            // 0.8: senza una sveglia sul telefono la regola aspetta, e non è un guasto.
+            is Trigger.NextAlarm -> if (active) {
+                val alarm = inputs.alarm?.takeIf { it.approvalFingerprint == automation.approvalFingerprint?.value }
+                add(
+                    if (alarm == null) {
+                        DiagnosisRow(
+                            DiagnosisLevel.INFO,
+                            language.pick(
+                                "No upcoming phone alarm to anticipate: it waits for the next one you set",
+                                "Nessuna sveglia in arrivo da anticipare: aspetta la prossima che imposti",
+                            ),
+                        )
+                    } else {
+                        val due = dayTimeLabel(alarm.eventAtMillis, nowMillis, language)
+                        DiagnosisRow(DiagnosisLevel.OK, language.pick("Runs $due", "Scatta $due"))
+                    },
+                )
+            }
             else -> Unit
+        }
+        // 0.8: una regola-intervallo dice se è in corso; quella di un'altra versione approvata non conta.
+        automation.exit?.let { exit ->
+            val span = inputs.span?.takeIf { it.approvalFingerprint == automation.approvalFingerprint }
+            add(spanRow(span, exit.restore, language))
         }
         add(lastEventRow(inputs.log, nowMillis, language))
     }
@@ -81,6 +108,32 @@ internal fun buildRuleDiagnosis(
             "Controllato alle ${clock(nowMillis)}",
         ),
     )
+}
+
+/** 0.8: in corso (con quanti valori rimetterà alla fine) o in attesa dell'inizio. */
+internal fun spanRow(span: ActiveSpan?, restore: Boolean, language: RenderLanguage): DiagnosisRow {
+    if (span == null) {
+        return DiagnosisRow(
+            DiagnosisLevel.OK,
+            language.pick(
+                "Not in progress: it starts with its trigger",
+                "Non in corso: comincia col suo trigger",
+            ),
+        )
+    }
+    val count = span.records.size
+    val text = when {
+        !restore -> language.pick("In progress: it waits for its end", "In corso: aspetta la sua fine")
+        count == 1 -> language.pick(
+            "In progress: at the end it puts back 1 value",
+            "In corso: alla fine rimette 1 valore",
+        )
+        else -> language.pick(
+            "In progress: at the end it puts back $count values",
+            "In corso: alla fine rimette $count valori",
+        )
+    }
+    return DiagnosisRow(DiagnosisLevel.INFO, text)
 }
 
 private fun statusRow(automation: Automation, language: RenderLanguage): DiagnosisRow = when {
@@ -183,6 +236,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The required sensor is not available or the physical activity permission is missing",
         "Il sensore richiesto non è disponibile o manca il permesso attività fisica",
     )
+    BlockCause.NFC_UNAVAILABLE -> l.pick(
+        "This phone has no NFC, so it cannot read tags",
+        "Questo telefono non ha l'NFC, quindi non può leggere i tag",
+    )
     BlockCause.WRITE_SETTINGS_ACCESS -> l.pick(
         "The \"Modify system settings\" access is missing",
         "Manca l'accesso a \"Modifica impostazioni di sistema\"",
@@ -194,6 +251,34 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
     BlockCause.ACCESSIBILITY_SERVICE -> l.pick(
         "The Argus Accessibility service is not turned on",
         "Il servizio di Accessibilità di Argus non è attivo",
+    )
+    BlockCause.NO_TELEPHONY -> l.pick(
+        "This phone cannot send SMS or make calls",
+        "Questo telefono non può inviare SMS né fare chiamate",
+    )
+    BlockCause.SEND_SMS_PERMISSION -> l.pick(
+        "The permission to send SMS is missing: turn on \"Send SMS\" in System",
+        "Manca il permesso per inviare SMS: attiva \"Invio SMS\" in Sistema",
+    )
+    BlockCause.CALL_PHONE_PERMISSION -> l.pick(
+        "The permission to make phone calls is missing: turn on \"Phone calls\" in System",
+        "Manca il permesso per fare chiamate: attiva \"Chiamate\" in Sistema",
+    )
+    BlockCause.CALL_SCREENING_ROLE -> l.pick(
+        "Argus is not the call screening app: turn on \"Call screening\" in System",
+        "Argus non è l'app di filtro chiamate: attiva \"Filtro chiamate\" in Sistema",
+    )
+    BlockCause.CONTACTS_PERMISSION -> l.pick(
+        "The contacts permission is missing: turn on \"Contacts\" in System",
+        "Manca il permesso per leggere i contatti: attiva \"Contatti\" in Sistema",
+    )
+    BlockCause.CALENDAR_PERMISSION -> l.pick(
+        "The calendar permission is missing: turn on \"Calendar rules\" in System",
+        "Manca il permesso del calendario: attiva \"Regole del calendario\" in Sistema",
+    )
+    BlockCause.NOT_AVAILABLE_YET -> l.pick(
+        "This is not available in this version",
+        "Non disponibile in questa versione",
     )
     BlockCause.OTHER -> l.pick(
         "A required feature is not available",
@@ -344,6 +429,26 @@ private fun lastEventRow(
     }
     if (fired != null) {
         val moment = relativeTimeLabel(fired.atMillis, nowMillis, language)
+        // B11: lo scatto c'è stato, ma l'esito è quello delle azioni: se sono fallite non è «OK».
+        val level = when (fired.executionStatus) {
+            null, ExecutionStatus.SUCCEEDED, ExecutionStatus.RUNNING, ExecutionStatus.SUBMITTED -> null
+            ExecutionStatus.DEFERRED -> DiagnosisLevel.INFO
+            ExecutionStatus.PARTIAL,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.INTERRUPTED,
+            ExecutionStatus.SUPPRESSED_COOLDOWN,
+            ExecutionStatus.SUPPRESSED_BUDGET,
+            ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
+            -> DiagnosisLevel.WARN
+        }
+        if (level != null) {
+            val what = fired.toLogRow(emptyList(), language).summary
+            return DiagnosisRow(
+                level,
+                language.pick("Last run $moment: $what", "Ultimo scatto $moment: $what"),
+            )
+        }
         return DiagnosisRow(
             DiagnosisLevel.OK,
             language.pick("Last run: $moment", "Ultimo scatto: $moment"),

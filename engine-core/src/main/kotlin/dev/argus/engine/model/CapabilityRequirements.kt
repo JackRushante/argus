@@ -85,6 +85,39 @@ object CapabilityIds {
     const val ACTION_SCREENSHOT = "action.screenshot"
     const val ACTION_APP_PERMISSION = "action.app_permission"
 
+    // 0.8 scaffold: una capability per famiglia nuova. Il probe le dà tutte non disponibili
+    // (`BlockCause.NOT_AVAILABLE_YET`) finché il loro engineer non le implementa. I sensori shake e
+    // flip_face_down usano `triggerSensor(kind)`; weekday non ne ha (orologio del motore, come time_window).
+    const val RULE_CONFIRM = "rule.confirm"
+    const val RULE_EXIT = "rule.exit"
+    const val TRIGGER_CALENDAR_EVENT = "trigger.calendar_event"
+    const val TRIGGER_NFC_TAG = "trigger.nfc_tag"
+    const val TRIGGER_NEXT_ALARM = "trigger.next_alarm"
+    const val TRIGGER_APP_USAGE = "trigger.app_usage"
+    const val TRIGGER_USER_MODE_CHANGED = "trigger.user_mode_changed"
+    const val STATE_WIFI_CONNECTED = "state.wifi_connected"
+    const val STATE_BLUETOOTH_CONNECTED = "state.bluetooth_connected"
+    const val STATE_HEADSET_CONNECTED = "state.headset_connected"
+    const val STATE_CALENDAR_BUSY = "state.calendar_busy"
+    /** Valori conservati: condizione `stored_compare` e variabile `stored`. */
+    const val STATE_STORED = "state.stored"
+    const val STATE_USER_MODE = "state.user_mode"
+    const val ACTION_ASK = "action.ask"
+    const val ACTION_SET_STORED = "action.set_stored"
+    const val ACTION_SET_USER_MODE = "action.set_user_mode"
+    const val ACTION_NOTIFICATION_REPLY = "action.notification_reply"
+    const val ACTION_NOTIFICATION_ACTION = "action.notification_action"
+    const val ACTION_SEND_SMS = "action.send_sms"
+    const val ACTION_CALL_NUMBER = "action.call_number"
+    const val ACTION_SEND_INTENT = "action.send_intent"
+    /** `send_intent` di tipo SERVICE: solo con un backend privilegiato (Shizuku, Sui o root). */
+    const val ACTION_SEND_INTENT_SERVICE = "action.send_intent.service"
+    const val ACTION_SCREEN_CALL = "action.screen_call"
+    /** `screen_call` solo per chi non è nei contatti: serve leggere i contatti. */
+    const val ACTION_SCREEN_CALL_CONTACTS = "action.screen_call.contacts"
+    /** `http_request` con intestazioni o parametri dalla cassaforte dei segreti. */
+    const val ACTION_HTTP_REQUEST_SECRETS = "action.http_request.secrets"
+
     fun state(key: String): String = "state.$key"
 }
 
@@ -98,6 +131,9 @@ object CapabilityRequirements {
         actions: List<Action>,
         conditions: Condition? = null,
         vars: List<VarBinding> = emptyList(),
+        // 0.8 scaffold: null per ogni regola esistente, quindi i requisiti derivati non cambiano.
+        confirm: ConfirmSpec? = null,
+        exit: ExitSpec? = null,
     ): Set<String> = buildSet {
         addAll(forTrigger(trigger))
         conditions?.let { addAll(forCondition(it)) }
@@ -105,7 +141,46 @@ object CapabilityRequirements {
         // Le variabili di stato leggono il device come i reader di P3: ne ereditano la capability
         // di famiglia (fail-closed: un binding State richiede il grant del suo reader).
         vars.forEach { addAll(forVarBinding(it)) }
+        confirm?.let { add(CapabilityIds.RULE_CONFIRM) }
+        exit?.let { span ->
+            add(CapabilityIds.RULE_EXIT)
+            addAll(forTrigger(span.trigger))
+            span.actions.forEach { addAll(forAction(it)) }
+            // Un'impostazione scritta all'inizio si rilegge col lettore di stato prima di cambiarla, per rimetterla.
+            if (span.restore && writesSetting(actions)) add(CapabilityIds.STATE_READER_SETTING)
+        }
     }
+
+    private fun writesSetting(actions: List<Action>): Boolean {
+        val pending = ArrayDeque(actions)
+        var visited = 0
+        while (pending.isNotEmpty() && visited++ < 4_096) {
+            when (val action = pending.removeFirst()) {
+                is Action.WriteSetting -> return true
+                is Action.If -> {
+                    pending.addAll(action.then)
+                    pending.addAll(action.orElse)
+                }
+                is Action.While -> pending.addAll(action.body)
+                else -> Unit
+            }
+        }
+        return false
+    }
+
+    /** Requisiti di una bozza, con tutti i suoi campi eseguibili. */
+    fun derive(draft: AutomationDraft): Set<String> =
+        derive(draft.trigger, draft.actions, draft.conditions, draft.vars, draft.confirm, draft.exit)
+
+    /** Requisiti di una regola ricalcolati dai suoi campi eseguibili (non dallo snapshot salvato). */
+    fun derive(automation: Automation): Set<String> = derive(
+        automation.trigger,
+        automation.actions,
+        automation.conditions,
+        automation.vars,
+        automation.confirm,
+        automation.exit,
+    )
 
     private fun forVarBinding(binding: VarBinding): Set<String> = when (binding) {
         is VarBinding.State -> setOf(binding.query.family.capabilityId)
@@ -114,6 +189,7 @@ object CapabilityRequirements {
         is VarBinding.Literal, is VarBinding.TriggerPayload, is VarBinding.RandomInt -> emptySet()
         // L'ora attuale la dà l'orologio del motore: nessuna capability.
         is VarBinding.ClockTime -> emptySet()
+        is VarBinding.Stored -> setOf(CapabilityIds.STATE_STORED)
     }
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
@@ -148,6 +224,11 @@ object CapabilityRequirements {
         is Trigger.Media -> setOf(CapabilityIds.TRIGGER_MEDIA)
         is Trigger.Manual -> setOf(CapabilityIds.TRIGGER_MANUAL)
         is Trigger.AppEvent -> setOf(CapabilityIds.TRIGGER_APP_EVENT)
+        is Trigger.CalendarEvent -> setOf(CapabilityIds.TRIGGER_CALENDAR_EVENT)
+        is Trigger.NfcTag -> setOf(CapabilityIds.TRIGGER_NFC_TAG)
+        is Trigger.NextAlarm -> setOf(CapabilityIds.TRIGGER_NEXT_ALARM)
+        is Trigger.AppUsage -> setOf(CapabilityIds.TRIGGER_APP_USAGE)
+        is Trigger.UserModeChanged -> setOf(CapabilityIds.TRIGGER_USER_MODE_CHANGED)
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
@@ -161,6 +242,19 @@ object CapabilityRequirements {
         is Condition.Not -> forCondition(condition.cond)
         // Le var vivono nello scope di esecuzione: nessuna capability OS per confrontarle.
         is Condition.VarCompare -> emptySet()
+        // Il giorno lo dà l'orologio del motore, come per time_window.
+        is Condition.Weekday -> emptySet()
+        // Con il nome della rete serve anche l'identità Wi-Fi del trigger connectivity: stessi permessi di posizione.
+        is Condition.WifiConnected -> if (condition.ssid == null) {
+            setOf(CapabilityIds.STATE_WIFI_CONNECTED)
+        } else {
+            setOf(CapabilityIds.STATE_WIFI_CONNECTED, CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+        }
+        is Condition.BluetoothConnected -> setOf(CapabilityIds.STATE_BLUETOOTH_CONNECTED)
+        is Condition.HeadsetConnected -> setOf(CapabilityIds.STATE_HEADSET_CONNECTED)
+        is Condition.CalendarBusy -> setOf(CapabilityIds.STATE_CALENDAR_BUSY)
+        is Condition.StoredCompare -> setOf(CapabilityIds.STATE_STORED)
+        is Condition.UserModeIs -> setOf(CapabilityIds.STATE_USER_MODE)
     }
 
     private fun forAction(action: Action): Set<String> = when (action) {
@@ -192,7 +286,12 @@ object CapabilityRequirements {
         // il probe le pubblica solo se concesso.
         is Action.SetBrightness -> setOf(CapabilityIds.ACTION_SET_BRIGHTNESS)
         is Action.SetRotation -> setOf(CapabilityIds.ACTION_SET_ROTATION)
-        is Action.HttpRequest -> setOf(CapabilityIds.ACTION_HTTP_REQUEST)
+        // 0.8 scaffold: con intestazioni o parametri segreti serve anche la cassaforte.
+        is Action.HttpRequest -> if (action.secretHeaders.isNullOrEmpty() && action.secretQuery.isNullOrEmpty()) {
+            setOf(CapabilityIds.ACTION_HTTP_REQUEST)
+        } else {
+            setOf(CapabilityIds.ACTION_HTTP_REQUEST, CapabilityIds.ACTION_HTTP_REQUEST_SECRETS)
+        }
         is Action.AppControl -> setOf(CapabilityIds.ACTION_APP_CONTROL)
         is Action.SetAirplane -> setOf(CapabilityIds.ACTION_SET_AIRPLANE)
         is Action.SetLocation -> setOf(CapabilityIds.ACTION_SET_LOCATION)
@@ -203,6 +302,24 @@ object CapabilityRequirements {
         is Action.AppPermission -> setOf(CapabilityIds.ACTION_APP_PERMISSION)
         // 0.5.1: serve il servizio di Accessibilità di Argus acceso (il probe lo pubblica solo allora).
         is Action.UiSteps -> setOf(CapabilityIds.ACTION_UI_STEPS)
+        // 0.8 scaffold: una capability per azione.
+        is Action.Ask -> setOf(CapabilityIds.ACTION_ASK)
+        is Action.SetStored -> setOf(CapabilityIds.ACTION_SET_STORED)
+        is Action.SetUserMode -> setOf(CapabilityIds.ACTION_SET_USER_MODE)
+        is Action.NotificationReply -> setOf(CapabilityIds.ACTION_NOTIFICATION_REPLY)
+        is Action.NotificationAction -> setOf(CapabilityIds.ACTION_NOTIFICATION_ACTION)
+        is Action.SendSms -> setOf(CapabilityIds.ACTION_SEND_SMS)
+        is Action.CallNumber -> setOf(CapabilityIds.ACTION_CALL_NUMBER)
+        is Action.SendIntent -> if (action.kind == IntentKind.SERVICE) {
+            setOf(CapabilityIds.ACTION_SEND_INTENT, CapabilityIds.ACTION_SEND_INTENT_SERVICE)
+        } else {
+            setOf(CapabilityIds.ACTION_SEND_INTENT)
+        }
+        is Action.ScreenCall -> if (action.onlyUnknownCallers) {
+            setOf(CapabilityIds.ACTION_SCREEN_CALL, CapabilityIds.ACTION_SCREEN_CALL_CONTACTS)
+        } else {
+            setOf(CapabilityIds.ACTION_SCREEN_CALL)
+        }
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

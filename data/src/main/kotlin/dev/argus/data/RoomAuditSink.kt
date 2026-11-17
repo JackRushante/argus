@@ -2,8 +2,12 @@ package dev.argus.data
 
 import dev.argus.data.dao.AuditDao
 import dev.argus.data.entities.AuditEntity
+import dev.argus.engine.directboot.BeforeUnlockCodes
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.ConfirmationCodes
+import dev.argus.engine.runtime.ProgramInterpreter
+import dev.argus.engine.runtime.SpanCodes
 
 /** [AuditSink] su Room (spec §10.6). Insert append-only via DAO suspend. */
 class RoomAuditSink(private val dao: AuditDao) : AuditSink {
@@ -21,8 +25,9 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
     }
 
     private fun redactedDetail(event: AuditEvent): String = when (event.kind) {
+        // 0.8: anche la pausa delle sole azioni di fine di una regola-intervallo (i valori sono già rimessi).
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_COOLDOWN ->
-            event.detail.takeIf { RETRY_AT.matches(it) } ?: ""
+            event.detail.takeIf { RETRY_AT.matches(it) || it == SpanCodes.EXIT_ACTIONS_COOLDOWN } ?: ""
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_BUDGET ->
             event.detail.takeIf { BUDGET_DETAIL.matches(it) || UNPRICED_MODEL_DETAIL.matches(it) } ?: ""
         // Il Log deve mostrare il vero motivo: un reason code snake_case di forma chiusa passa
@@ -58,9 +63,20 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
             event.detail.takeIf { it in RULE_DELETED_REASONS } ?: "rule_deleted"
         dev.argus.engine.runtime.AuditKind.RULE_NEEDS_REVIEW ->
             event.detail.takeIf { it in RULE_NEEDS_REVIEW_REASONS } ?: "rule_needs_review"
-        dev.argus.engine.runtime.AuditKind.FIRED,
-        dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE,
-        dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE -> ""
+        // 0.8: solo l'esito del filtro chiamate, mai il numero.
+        dev.argus.engine.runtime.AuditKind.CALL_SCREENED ->
+            event.detail.takeIf { it in CALL_SCREENED_DETAILS } ?: ""
+        // 0.8: why the option «active before unlock» switched itself off, a closed code.
+        dev.argus.engine.runtime.AuditKind.BEFORE_UNLOCK_OFF ->
+            event.detail.takeIf { it in BeforeUnlockCodes.OFF_DETAILS } ?: ""
+        // 0.8: la fine di una regola-intervallo e uno scatto avvenuto prima dello sblocco si distinguono nel
+        // Log: due codici chiusi, gli unici ammessi.
+        dev.argus.engine.runtime.AuditKind.FIRED ->
+            event.detail.takeIf { it == SpanCodes.EXIT || it == BeforeUnlockCodes.FIRED } ?: ""
+        // 0.8: conferme, domande senza risposta e ripristini degli intervalli: solo i codici dell'elenco chiuso.
+        dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE ->
+            event.detail.takeIf { it in NOT_ELIGIBLE_DETAILS } ?: ""
+        dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE -> ""
     }
 
     private fun isReasonCode(value: String): Boolean = REASON_CODE.matches(value)
@@ -73,6 +89,14 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         const val CONDITION_STATE_UNAVAILABLE = "condition_state_unavailable"
         /** Codice snake_case a vocabolario chiuso (ValidationIssue.code o reason interno). */
         val REASON_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
+        val CALL_SCREENED_DETAILS = setOf("screen_call_rejected", "screen_call_silenced", "screen_call_failed_open")
+        /** 0.8: i motivi chiusi di uno scatto non eseguito che il Log mostra (conferma, domanda, intervallo). */
+        val NOT_ELIGIBLE_DETAILS: Set<String> = ConfirmationCodes.ALL + setOf(
+            ProgramInterpreter.ASK_TIMEOUT,
+            ProgramInterpreter.ASK_RESUME_STALE,
+            SpanCodes.VALUE_UNREADABLE,
+            SpanCodes.RESTORED_RULE_CHANGED,
+        )
         const val MAX_VALIDATION_CODES = 8
         // --- Lifecycle riuscito (task #31-B): un set chiuso per kind, fallback generico. ---
         /** Unico ingresso in ARMED: l'approvazione utente (submit o edit passano di lì). */
@@ -89,6 +113,8 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
             "validation_failed",
             "requirements_changed",
             "planner_failed",
+            // 0.8: l'utente ha eliminato un segreto della cassaforte che la regola usa.
+            "secret_deleted",
         )
     }
 }

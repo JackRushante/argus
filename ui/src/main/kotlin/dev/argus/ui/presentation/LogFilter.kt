@@ -39,6 +39,8 @@ enum class LogFilter {
             AuditKind.RULE_DISABLED,
             AuditKind.RULE_DELETED,
             AuditKind.RULE_NEEDS_REVIEW,
+            // 0.8: the option «active before unlock» switched itself off.
+            AuditKind.BEFORE_UNLOCK_OFF,
         )
 
         private val PROBLEM_KINDS = setOf(

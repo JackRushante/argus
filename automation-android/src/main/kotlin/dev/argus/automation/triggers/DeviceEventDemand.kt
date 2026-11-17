@@ -20,6 +20,9 @@ enum class DeviceEventSource {
 
     /** 0.5.1: app aperta/chiusa, letta da `UsageStatsManager` (serve l'accesso ai dati di utilizzo). */
     APP_EVENT,
+
+    /** 0.8: tempo d'uso di oggi di un'app, dagli stessi eventi di utilizzo, solo a schermo acceso. */
+    APP_USAGE,
 }
 
 /** La sorgente di cui ha bisogno il trigger, o `null` se il trigger non passa dalla sentinella. */
@@ -33,6 +36,11 @@ fun Trigger.deviceEventSource(): DeviceEventSource? = when (this) {
     }
     is Trigger.Media -> DeviceEventSource.MEDIA
     is Trigger.AppEvent -> DeviceEventSource.APP_EVENT
+    // 0.8 scaffold: nessuna sorgente della sentinella finché il trigger è spento. Se il trigger passa
+    // dalla sentinella, chi lo implementa aggiunge qui la sua DeviceEventSource.
+    is Trigger.AppUsage -> DeviceEventSource.APP_USAGE
+    is Trigger.UserModeChanged -> null
+    is Trigger.NfcTag -> null
     else -> null
 }
 
@@ -44,6 +52,7 @@ fun Trigger.deviceEventSource(): DeviceEventSource? = when (this) {
 class DeviceEventDemand {
     private val required = MutableStateFlow<Set<DeviceEventSource>>(emptySet())
     private val apps = MutableStateFlow<Set<String>>(emptySet())
+    private val usage = MutableStateFlow<List<AppUsageWatch>>(emptyList())
 
     val sources: StateFlow<Set<DeviceEventSource>> = required.asStateFlow()
 
@@ -52,6 +61,13 @@ class DeviceEventDemand {
      * utilizzo segue tutte le app per tenere lo stato, ma consegna al motore solo queste.
      */
     val appPackages: StateFlow<Set<String>> = apps.asStateFlow()
+
+    /** 0.8: le regole armate `app_usage` (app e soglia), lette a ogni controllo del tempo d'uso. */
+    val appUsage: StateFlow<List<AppUsageWatch>> = usage.asStateFlow()
+
+    fun updateAppUsage(watches: List<AppUsageWatch>) {
+        usage.value = watches.toList()
+    }
 
     fun update(sources: Set<DeviceEventSource>) {
         required.value = sources.toSet()

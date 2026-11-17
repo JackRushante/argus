@@ -23,12 +23,23 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- 0.8: trigger «tag NFC» (permesso normal, auto-concesso). L'NFC è facoltativo: senza, Argus si installa
+         lo stesso e il trigger risulta non disponibile con il suo motivo. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
 
     <!-- 0.4.1: package visibility per i motori di sintesi vocale (azione «leggi ad alta voce»);
          senza, da Android 11 TextToSpeech non vede nessun motore. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- 0.7.2: il riconoscitore vocale di sistema per la dettatura in chat. Registra la sua activity,
+             non Argus: nessun permesso RECORD_AUDIO. -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
     </queries>
 
@@ -55,10 +66,70 @@
             </intent-filter>
         </activity>
 
+        <!-- 0.7.2: riceve una regola da un'altra app (testo dal foglio di condivisione, file di backup da un
+             file manager). Esportata per forza, quindi fa il minimo: mostra cosa è arrivato e, solo su conferma
+             dell'utente in questa schermata, crea bozze da approvare con l'import esistente. Mai una regola
+             armata. MainActivity resta l'unico launcher e non legge i dati degli Intent. -->
+        <activity
+            android:name=".importing.ImportRuleActivity"
+            android:exported="true"
+            android:label="@string/import_activity_label"
+            android:theme="@style/Theme.Argus">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+        </activity>
+
         <!-- 0.4.1 (F8): trampolino invisibile di scorciatoie Home e pulsanti del widget. NON esportato:
              lo avvia solo il sistema per conto di Argus, e ogni avvio verifica il token della regola. -->
         <activity
             android:name=".manual.ManualRunActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Argus.Trampoline" />
+
+        <!-- 0.8: trampolino invisibile dei tag NFC. ESPORTATO per forza (i filtri NFC del sistema): qualunque app
+             può avviarlo con un id inventato, quindi una scansione è «verificata» solo se il chiamante iniziale è
+             il servizio NFC (Android 15+); solo le verificate possono avviare shell o macro sullo schermo. Passa
+             la scansione al motore e si chiude senza mostrare nulla. -->
+        <activity
+            android:name=".nfc.NfcTagActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Argus.Trampoline">
+            <intent-filter>
+                <action android:name="android.nfc.action.TECH_DISCOVERED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.action.TECH_DISCOVERED"
+                android:resource="@xml/nfc_tech_filter" />
+        </activity>
+
+        <!-- 0.7.2: trampolino invisibile del tocco di un avviso di salute. NON esportato: lo avvia solo il
+             PendingIntent della notifica di Argus; passa la schermata alla navigazione dentro il processo. -->
+        <activity
+            android:name=".nav.HealthAlertOpenActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="true"
@@ -82,6 +153,18 @@
             android:exported="true"
             android:icon="@drawable/ic_tile_pause"
             android:label="@string/pause_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- 0.8: riquadro «Argus: modalità», scorre le modalità dell'utente. -->
+        <service
+            android:name=".manual.ModeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_mode"
+            android:label="@string/mode_tile_label"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />

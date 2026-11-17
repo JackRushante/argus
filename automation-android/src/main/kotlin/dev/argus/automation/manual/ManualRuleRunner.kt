@@ -111,7 +111,8 @@ class ManualRuleRunner(
         )
         // La pausa si legge prima di consegnare, solo per dire all'utente com'è andata: a decidere è il
         // motore, che salta lo scatto e lo scrive nel Log.
-        val paused = pause.isPaused()
+        // 0.7.2: per QUESTA regola, così conta anche la pausa di un suo gruppo (etichetta).
+        val paused = pause.pauseCodeFor(automation.id) != null
         val job = launcher.launch(automation.id) { dispatcher.dispatch(envelope) }
         return ManualRunResult.Accepted(ruleName = automation.name, paused = paused, completion = job)
     }

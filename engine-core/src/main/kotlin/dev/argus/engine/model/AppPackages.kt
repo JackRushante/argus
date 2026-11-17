@@ -16,7 +16,14 @@ import java.util.IdentityHashMap
  * entra solo in [packagesToCheck].
  */
 object AppPackages {
-    enum class Kind { APP_EVENT, LAUNCH_APP, APP_CONTROL, APP_PERMISSION, UI_STEPS }
+    enum class Kind { APP_EVENT, LAUNCH_APP, APP_CONTROL, APP_PERMISSION, UI_STEPS, APP_USAGE }
+
+    /** Package sostituibile nominato dal trigger: `app_event` e (0.8) `app_usage`. */
+    private fun triggerPackage(trigger: Trigger): Pair<Kind, String>? = when (trigger) {
+        is Trigger.AppEvent -> Kind.APP_EVENT to trigger.pkg
+        is Trigger.AppUsage -> Kind.APP_USAGE to trigger.pkg
+        else -> null
+    }
 
     data class Ref(val slot: Int, val kind: Kind, val pkg: String)
 
@@ -38,9 +45,9 @@ object AppPackages {
         return map
     }
 
-    /** Slot del trigger `app_event` se nomina un package valido, altrimenti null. */
+    /** Slot del trigger `app_event` (o `app_usage`) se nomina un package valido, altrimenti null. */
     fun triggerSlot(trigger: Trigger): Int? =
-        if (trigger is Trigger.AppEvent && AppPackagePolicy.valid(trigger.pkg)) 0 else null
+        if (triggerPackage(trigger)?.second?.let(AppPackagePolicy::valid) == true) 0 else null
 
     /**
      * Tutti i package che devono esistere sul telefono perché la regola funzioni, senza doppioni e
@@ -65,8 +72,12 @@ object AppPackages {
         if (refs(trigger, actions).none { it.slot == slot }) return null
         var counter = 0
         fun next(): Int = counter++
-        val newTrigger = if (trigger is Trigger.AppEvent && AppPackagePolicy.valid(trigger.pkg)) {
-            if (next() == slot) trigger.copy(pkg = newPackage) else trigger
+        val newTrigger = if (triggerSlot(trigger) != null && next() == slot) {
+            when (trigger) {
+                is Trigger.AppEvent -> trigger.copy(pkg = newPackage)
+                is Trigger.AppUsage -> trigger.copy(pkg = newPackage)
+                else -> trigger
+            }
         } else {
             trigger
         }
@@ -108,7 +119,7 @@ object AppPackages {
         fun add(kind: Kind, pkg: String?, action: Action?) {
             if (pkg != null && AppPackagePolicy.valid(pkg)) out += Entry(Ref(out.size, kind, pkg), action)
         }
-        if (trigger is Trigger.AppEvent) add(Kind.APP_EVENT, trigger.pkg, null)
+        triggerPackage(trigger)?.let { (kind, pkg) -> add(kind, pkg, null) }
 
         fun walk(list: List<Action>, depth: Int) {
             if (depth > MAX_DEPTH) return

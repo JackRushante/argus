@@ -111,6 +111,10 @@ internal object LogReasonLabels {
             "questa azione AI non è supportata in un programma",
         ),
         "deadline_exceeded" to Label("the rule ran for too long", "la regola è durata troppo a lungo"),
+        "generative_call_limit" to Label(
+            "too many AI calls in one run, at most 30",
+            "troppe chiamate AI in una sola esecuzione, al massimo 30",
+        ),
         "capture_missing" to Label("the result to keep was missing", "il risultato da conservare mancava"),
         "capture_too_long" to Label("the result to keep is too long", "il risultato da conservare è troppo lungo"),
         "while_count_unavailable" to Label(
@@ -168,14 +172,69 @@ internal object LogReasonLabels {
             "il server ha rimandato a un altro indirizzo",
         ),
         "http_too_many_redirects" to Label("too many redirects", "troppi reindirizzamenti"),
+        // --- 0.8: risposta catturata e segreti della cassaforte (mai il valore, mai il nome) ---
+        "http_cleartext_secret" to Label(
+            "a secret cannot travel unencrypted",
+            "un segreto non può viaggiare senza cifratura",
+        ),
+        "http_secret_missing" to Label(
+            "a secret the rule uses is no longer saved",
+            "un segreto usato dalla regola non è più salvato",
+        ),
+        "http_secret_invalid" to Label(
+            "a secret cannot be sent in a header (only plain ASCII characters)",
+            "un segreto non si può inviare in un'intestazione (solo caratteri ASCII semplici)",
+        ),
+        "http_capture_not_json" to Label("the response is not JSON", "la risposta non è JSON"),
+        "http_capture_path_missing" to Label(
+            "the response has nothing at the requested path",
+            "la risposta non ha nulla nel percorso richiesto",
+        ),
+        "http_capture_not_scalar" to Label(
+            "the requested part of the response is not a text, a number or yes/no",
+            "la parte richiesta della risposta non è un testo, un numero o sì/no",
+        ),
+        "http_capture_too_long" to Label(
+            "the response to keep is over 4096 characters",
+            "la risposta da conservare supera 4096 caratteri",
+        ),
+        "http_capture_invalid_chars" to Label(
+            "the response contains control characters",
+            "la risposta contiene caratteri di controllo",
+        ),
+        "http_capture_response_too_large" to Label(
+            "the response is over 64 KB",
+            "la risposta supera 64 KB",
+        ),
+        "secret_deleted" to Label("a secret it uses was deleted", "un segreto che usa è stato eliminato"),
         "json_quote_context" to Label(
             "external data in a JSON body must sit inside a quoted string",
             "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",
         ),
+        "shell_quote_context" to Label(
+            "external data sits where the shell command cannot keep it inert",
+            "un dato esterno è in un punto del comando shell dove non resta inerte",
+        ),
+        "shell_numeric_context" to Label(
+            "the shell command expected a whole number and the external data was not one",
+            "il comando shell si aspettava un numero intero e il dato esterno non lo era",
+        ),
+        "write_setting_key_interpolated" to Label(
+            "the setting name must be literal",
+            "il nome dell'impostazione deve essere scritto per esteso",
+        ),
+        "url_host_changed" to Label(
+            "the filled-in address pointed to a different site than the approved one",
+            "l'indirizzo completato portava a un sito diverso da quello approvato",
+        ),
         // --- 0.5.1: azioni privilegiate tipizzate ---
         "target_forbidden" to Label(
-            "Argus, the launcher and essential system apps cannot be changed by a rule",
-            "Argus, il launcher e le app di sistema essenziali non si possono modificare con una regola",
+            "Argus, the launcher, the keyboard, WebView and essential system apps cannot be changed by a rule",
+            "Argus, il launcher, la tastiera, WebView e le app di sistema essenziali non si possono modificare con una regola",
+        ),
+        "protected_apps_unknown" to Label(
+            "Argus could not read which apps this phone needs (launcher, keyboard, WebView), so it changed nothing",
+            "Argus non è riuscito a leggere quali app servono al telefono (launcher, tastiera, WebView), quindi non ha cambiato nulla",
         ),
         "nfc_unavailable" to Label("this phone has no NFC", "questo telefono non ha l'NFC"),
         "permission_not_applied" to Label(
@@ -194,10 +253,169 @@ internal object LogReasonLabels {
             "the screen capture was not a valid image",
             "la cattura dello schermo non è un'immagine valida",
         ),
+        // --- 0.8 scaffold: un tipo dietro un FeatureGate spento (interpolatore ed esecutore) ---
+        "not_available_yet" to Label(
+            "this is not available in this version",
+            "non disponibile in questa versione",
+        ),
+        // --- 0.8: SMS, chiamate, Intent, filtro chiamate ---
+        "sms_rate_limited" to Label(
+            "limit reached: at most 10 SMS an hour",
+            "limite raggiunto: al massimo 10 SMS l'ora",
+        ),
+        "sms_destination_rate_limited" to Label(
+            "limit reached: at most 3 SMS an hour to the same number",
+            "limite raggiunto: al massimo 3 SMS l'ora allo stesso numero",
+        ),
+        "call_rate_limited" to Label(
+            "limit reached: at most 3 calls an hour",
+            "limite raggiunto: al massimo 3 chiamate l'ora",
+        ),
+        "telephony_rate_ledger_unavailable" to Label(
+            "not sent: the hourly SMS and call count could not be saved",
+            "non inviato: non si è potuto salvare il conteggio orario di SMS e chiamate",
+        ),
+        "sms_number_not_sender" to Label(
+            "the SMS recipient is not the number that called or texted",
+            "il destinatario dell'SMS non è il numero che ha chiamato o scritto",
+        ),
+        "sms_number_invalid" to Label(
+            "the SMS recipient is not a valid phone number",
+            "il destinatario dell'SMS non è un numero valido",
+        ),
+        "telephony_unavailable" to Label(
+            "this phone cannot send SMS or make calls",
+            "questo telefono non può inviare SMS né fare chiamate",
+        ),
+        "sms_send_permission_missing" to Label(
+            "the permission to send SMS is missing",
+            "manca il permesso per inviare SMS",
+        ),
+        "call_permission_missing" to Label(
+            "the permission to make calls is missing",
+            "manca il permesso per fare chiamate",
+        ),
+        "intent_unresolved" to Label(
+            "no app on the phone accepts this Intent",
+            "nessuna app del telefono accetta questo Intent",
+        ),
+        "intent_target_forbidden" to Label(
+            "an Intent cannot be sent to Argus itself",
+            "un Intent non può essere rivolto ad Argus stesso",
+        ),
+        "screen_call_known_caller" to Label(
+            "the caller is in your contacts: the rule is only for unknown callers",
+            "chi chiama è nei tuoi contatti: la regola vale solo per gli sconosciuti",
+        ),
+        "screen_call_caller_unverified" to Label(
+            "it was not possible to check whether the caller is in your contacts, so the rule did not run",
+            "non si è potuto verificare se chi chiama è nei tuoi contatti, quindi la regola non è partita",
+        ),
+        "screen_call_not_applied" to Label(
+            "the call screening did not decide this call",
+            "il filtro chiamate non ha deciso questa chiamata",
+        ),
+        // --- 0.8: valori conservati e modalità ---
+        "stored_type_mismatch" to Label(
+            "the saved variable has a different type",
+            "la variabile salvata è di un altro tipo",
+        ),
+        "stored_value_invalid" to Label(
+            "the value to save is not valid (too long or not a number)",
+            "il valore da salvare non è valido (troppo lungo o non numerico)",
+        ),
+        "stored_key_limit" to Label(
+            "there are already 64 saved variables",
+            "ci sono già 64 variabili salvate",
+        ),
+        "stored_key_invalid" to Label("the variable name is not valid", "il nome della variabile non è valido"),
+        "stored_unavailable" to Label(
+            "the saved variables could not be read or written",
+            "non è stato possibile leggere o scrivere le variabili salvate",
+        ),
+        "stored_unresolved" to Label(
+            "the value to save was not prepared by the program",
+            "il valore da salvare non è stato preparato dal programma",
+        ),
+        "user_mode_unknown" to Label("the mode no longer exists", "la modalità non esiste più"),
+        "user_mode_unavailable" to Label(
+            "the modes could not be read or changed",
+            "non è stato possibile leggere o cambiare la modalità",
+        ),
+        "user_mode_renamed" to Label(
+            "a mode used by this rule was renamed",
+            "una modalità usata da questa regola è stata rinominata",
+        ),
+        "user_mode_deleted" to Label(
+            "a mode used by this rule was deleted",
+            "una modalità usata da questa regola è stata eliminata",
+        ),
+        // --- 0.8: regole-intervallo («finché…, poi rimetti com'era») ---
+        "span_exit" to Label("the rule ended and put the values back", "la regola è finita e ha rimesso i valori"),
+        "span_value_unreadable" to Label(
+            "a value could not be read before the change: it will not be put back",
+            "un valore non si è potuto leggere prima del cambio: non verrà rimesso",
+        ),
+        "span_restore_failed" to Label("a value could not be put back", "un valore non si è potuto rimettere"),
+        "span_restore_capability_unavailable" to Label(
+            "a value was not put back: what it needs is not available",
+            "un valore non è stato rimesso: manca ciò che serve per farlo",
+        ),
+        "span_restored_rule_changed" to Label(
+            "the rule was switched off, deleted or changed while in progress: values put back",
+            "la regola è stata spenta, eliminata o modificata mentre era in corso: valori rimessi",
+        ),
+        "span_exit_actions_cooldown" to Label(
+            "values put back; the end actions were skipped by the pause",
+            "valori rimessi; le azioni di fine saltate per la pausa",
+        ),
+        // --- 0.8: «chiedimi prima di eseguire», domande con pulsanti, risposte AI vincolate ---
+        "confirmation_requested" to Label("waiting for your confirmation", "in attesa della tua conferma"),
+        "confirmation_pending" to Label(
+            "a confirmation for this rule is already waiting",
+            "c'è già una conferma in attesa per questa regola",
+        ),
+        "confirmation_unavailable" to Label(
+            "could not ask for confirmation (notifications are off)",
+            "impossibile chiedere conferma (notifiche spente)",
+        ),
+        "confirmation_cancelled" to Label("you cancelled it", "l'hai annullata"),
+        "confirmation_expired" to Label("no answer in time, not run", "nessuna risposta in tempo, non eseguita"),
+        "confirmation_stale" to Label(
+            "the rule changed or was switched off before you confirmed",
+            "la regola è cambiata o è stata spenta prima della conferma",
+        ),
+        "ask_timeout" to Label("no answer to the question in time", "nessuna risposta alla domanda in tempo"),
+        "ask_timeout_default" to Label("no answer, the default choice was used", "nessuna risposta, usata la scelta predefinita"),
+        "ask_unavailable" to Label("the question could not be asked", "la domanda non si è potuta porre"),
+        "ask_notification_unavailable" to Label(
+            "the question could not be shown (notifications are off)",
+            "la domanda non si è potuta mostrare (notifiche spente)",
+        ),
+        "ask_answer_invalid" to Label("the answer was not one of the choices", "la risposta non era una delle scelte"),
+        "ask_failed" to Label("the question failed", "la domanda non è riuscita"),
+        "ask_outside_program" to Label("a question can only run inside its rule", "una domanda funziona solo dentro la sua regola"),
+        "ask_resume_stale" to Label(
+            "the rule changed or was switched off before the answer, it did not go on",
+            "la regola è cambiata o è stata spenta prima della risposta, non è proseguita",
+        ),
+        "ask_resume_invalid" to Label(
+            "the saved question did not match the rule, it did not go on",
+            "la domanda salvata non corrispondeva alla regola, non è proseguita",
+        ),
+        "llm_output_invalid" to Label(
+            "the AI did not answer with one of the allowed answers",
+            "l'AI non ha risposto con una delle risposte ammesse",
+        ),
         // --- 0.4.1: «Pausa automazioni» ---
         "paused" to Label(
             "automations are paused",
             "le automazioni sono in pausa",
+        ),
+        // --- 0.7.2: pausa di un gruppo di regole (etichetta) ---
+        "paused_group" to Label(
+            "a label group of this rule is paused",
+            "un gruppo (etichetta) di questa regola è in pausa",
         ),
         // --- 0.5.1: macro sullo schermo (Accessibilità) ---
         "ui_steps_external_trigger" to Label(
@@ -217,8 +435,12 @@ internal object LogReasonLabels {
             "un'altra macro sullo schermo è già in corso",
         ),
         "ui_forbidden_screen" to Label(
-            "the macro reached a screen it may not touch (Argus, Settings, installer or permissions)",
-            "la macro è arrivata su una schermata che non può toccare (Argus, Impostazioni, installatore o permessi)",
+            "the macro reached a screen it may not touch (Argus, Settings, system, permission or security screens)",
+            "la macro è arrivata su una schermata che non può toccare (Argus, Impostazioni, sistema, permessi o sicurezza)",
+        ),
+        "ui_wrong_app" to Label(
+            "another app came to the front, so the macro stopped before touching it",
+            "è passata davanti un'altra app, quindi la macro si è fermata prima di toccarla",
         ),
         "ui_open_failed" to Label(
             "the app did not come to the front",
@@ -259,6 +481,35 @@ internal object LogReasonLabels {
         "ui_action_failed" to Label(
             "Android did not accept the Back or Home press",
             "Android non ha accettato il tasto Indietro o Home",
+        ),
+        // --- 0.8: the copy of a rule kept to run before the first unlock, refused before unlock ---
+        "before_unlock_copy_corrupt" to Label(
+            "the copy kept to run before unlock was damaged",
+            "la copia per lo scatto prima dello sblocco era danneggiata",
+        ),
+        "before_unlock_not_armed" to Label(
+            "the copy kept to run before unlock was not of an armed rule",
+            "la copia per lo scatto prima dello sblocco non era di una regola armata",
+        ),
+        "before_unlock_not_qualifying" to Label(
+            "the rule cannot run before unlock",
+            "la regola non può scattare prima dello sblocco",
+        ),
+        "before_unlock_invalid" to Label(
+            "the copy kept to run before unlock no longer passes validation",
+            "la copia per lo scatto prima dello sblocco non supera più la validazione",
+        ),
+        "before_unlock_duplicate" to Label(
+            "the copy kept to run before unlock held the rule twice",
+            "la copia per lo scatto prima dello sblocco conteneva la regola due volte",
+        ),
+        "before_unlock_too_many" to Label(
+            "too many rules to run before unlock",
+            "troppe regole da far scattare prima dello sblocco",
+        ),
+        "before_unlock_not_allowed" to Label(
+            "this action cannot run before unlock",
+            "questa azione non può essere eseguita prima dello sblocco",
         ),
         // --- Codici generici (nessun motivo più preciso disponibile) ---
         "execution_error" to Label("unspecified error", "errore non specificato"),

@@ -31,6 +31,10 @@ class RequiredPairsTest(unittest.TestCase):
                 seen[item] = klass
         self.assertFalse(set(seen) & set(pairwise.CONTROL_FLOW))
 
+    def test_switched_off_types_stay_out_of_the_coverage_model(self):
+        self.assertFalse(set(pairwise.NOT_YET_AVAILABLE_TRIGGERS) & set(pairwise.TRIGGERS))
+        self.assertFalse(set(pairwise.NOT_YET_AVAILABLE_ACTIONS) & set(pairwise.ALL_ACTION_TYPES))
+
     def test_pairs_are_unordered_and_cross_parameter(self):
         for pair in pairwise.required_pairs():
             self.assertEqual(2, len(pair))

@@ -10,12 +10,16 @@ import dev.argus.automation.notification.ReplyBurstSource
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueCoercion
@@ -87,11 +91,13 @@ class AndroidGenerativeLane(
     private val queue: Channel<QueuedAction>
 
     /**
-     * Event id già accorpati nella risposta a un evento precedente della stessa raffica: se l'Engine
-     * li sottopone comunque (cooldown assente o breve) si chiudono senza una seconda generazione.
-     * Toccato solo dal consumer unico della lane.
+     * Eventi già accorpati in una risposta INVIATA (o messa da parte) per la stessa azione reply della
+     * stessa regola approvata: se l'Engine li sottopone comunque (cooldown assente o breve) si chiudono
+     * senza una seconda generazione. La chiave comprende regola, fingerprint e percorso dell'azione
+     * (B2): un'altra regola generativa sulla stessa chat non viene mai chiusa da qui. Toccato solo dal
+     * consumer unico della lane.
      */
-    private val absorbedEventIds = LinkedHashSet<TriggerEventId>()
+    private val absorbedEvents = LinkedHashSet<AbsorbedKey>()
 
     init {
         require(capacity > 0) { "La capacità generativa deve essere positiva" }
@@ -212,9 +218,12 @@ class AndroidGenerativeLane(
             return ActResult(text = null, metaError = "action_contract_invalid")
         }
 
+        val output = action.output
         val act = try {
             withTimeout(action.timeoutMs) {
-                if (request.runtimeData.isEmpty()) {
+                if (output != null) {
+                    constrainedAct(queued, action, request, output)
+                } else if (request.runtimeData.isEmpty()) {
                     brain.act(
                         context = queued.context,
                         goal = action.goal,
@@ -248,6 +257,35 @@ class AndroidGenerativeLane(
         validateResolved(queued, request)?.let { return ActResult(text = null, metaError = it) }
         if (action.captureAs != null) return act
         return deliverResolved(queued, action, text)
+    }
+
+    /**
+     * 0.8 `invoke_llm.output`: chiede la forma approvata (output strutturato dove il transport lo sa
+     * fare) e ricontrolla SEMPRE il testo con [LlmOutputPolicy.normalize]. Una risposta fuori forma vale
+     * un solo nuovo tentativo, poi [LlmOutputPolicy.OUTPUT_INVALID]; mai una coercizione del testo libero.
+     * Un errore di trasporto o di budget non si ritenta: torna così com'è.
+     */
+    private suspend fun constrainedAct(
+        queued: QueuedAction,
+        action: Action.InvokeLlm,
+        request: ResolvedRequest,
+        output: OutputSpec,
+    ): ActResult {
+        repeat(CONSTRAINED_ATTEMPTS) {
+            val result = brain.actConstrained(
+                context = queued.context,
+                goal = action.goal,
+                contextSources = action.contextSources,
+                allowedTools = action.allowedTools,
+                runtimeData = request.runtimeData,
+                output = output,
+            )
+            val text = result.text ?: return result
+            LlmOutputPolicy.normalize(output, text)?.let { canonical ->
+                return ActResult(text = canonical, metaError = null, usage = result.usage)
+            }
+        }
+        return ActResult(text = null, metaError = LlmOutputPolicy.OUTPUT_INVALID)
     }
 
     /** Consegna sincrona P4. Il testo restituito segnala successo all'executor ma non viene catturato. */
@@ -343,8 +381,9 @@ class AndroidGenerativeLane(
 
     private suspend fun process(queued: QueuedAction) {
         if (!awaitSubmitted(queued)) return
-        if (queued.context.eventId in absorbedEventIds) {
-            // Messaggio già incluso nella risposta generata per la raffica: nessuna seconda reply.
+        val burstTarget = replyBurstTarget(queued)
+        if (burstTarget != null && absorbedKey(queued.context, queued.context.eventId) in absorbedEvents) {
+            // Messaggio già incluso nella risposta inviata per la raffica: nessuna seconda reply.
             complete(queued, ActionJournalOutcome.SUCCEEDED, "coalesced")
             return
         }
@@ -355,14 +394,16 @@ class AndroidGenerativeLane(
 
         // D8: la reply 1:1 attende la fine della raffica. Il contesto per il modello porta il testo
         // di tutti i messaggi; validazione e journal restano sul contesto del PRIMO evento.
-        val brainContext = replyBurstTarget(queued)?.let { target ->
-            val merged = awaitReplyBurst(queued, target)
+        var burstAbsorbed: List<TriggerEventId> = emptyList()
+        val brainContext = burstTarget?.let { target ->
+            val burst = awaitReplyBurst(queued, target)
             // La regola può essere cambiata durante l'attesa: nessuna chiamata al modello a vuoto.
             validate(queued)?.let { code ->
                 complete(queued, ActionJournalOutcome.FAILED, code)
                 return
             }
-            merged
+            burstAbsorbed = burst.absorbed
+            burst.context
         } ?: queued.context
 
         val act = try {
@@ -422,11 +463,16 @@ class AndroidGenerativeLane(
             ),
         )
         when (delivery) {
-            NotificationReplyDelivery.Sent ->
+            NotificationReplyDelivery.Sent -> {
+                // Solo ora gli altri messaggi della raffica hanno davvero una risposta (B2).
+                rememberAbsorbed(queued.context, burstAbsorbed)
                 complete(queued, ActionJournalOutcome.SUCCEEDED, null)
+            }
 
             is NotificationReplyDelivery.Failed -> {
                 if (delivery.code in DEFER_ELIGIBLE_CODES && deferSafely(queued.context, text)) {
+                    // La risposta alla raffica è salvata per l'invio a mano: copre anche loro.
+                    rememberAbsorbed(queued.context, burstAbsorbed)
                     complete(queued, ActionJournalOutcome.DEFERRED, delivery.code)
                 } else {
                     complete(
@@ -457,10 +503,10 @@ class AndroidGenerativeLane(
     /**
      * Aspetta [burstSilenceMillis] senza nuovi messaggi della conversazione, ma al massimo
      * [burstMaxMillis] dal primo, poi restituisce il contesto per il modello: stesso primo evento,
-     * con il testo di tutta la raffica (l'ultimo messaggio per ultimo). Gli event id degli altri
-     * messaggi si ricordano come accorpati, così un loro eventuale fire separato non risponde due volte.
+     * con il testo di tutta la raffica (l'ultimo messaggio per ultimo), e gli event id degli altri
+     * messaggi. Questi si ricordano come accorpati solo dopo l'invio della risposta.
      */
-    private suspend fun awaitReplyBurst(queued: QueuedAction, target: BurstTarget): FireContext {
+    private suspend fun awaitReplyBurst(queued: QueuedAction, target: BurstTarget): MergedBurst {
         val source = requireNotNull(replyBursts)
         val firstEventId = queued.context.eventId
         var seen = source.burst(target.key, target.conversationId, firstEventId)?.latestEventId
@@ -472,24 +518,46 @@ class AndroidGenerativeLane(
                 } ?: break
             }
         }
-        val burst = source.burst(target.key, target.conversationId, firstEventId)
-            ?: return queued.context
-        burst.messages.forEach { message ->
-            if (message.eventId != firstEventId) rememberAbsorbed(message.eventId)
+        val alone = MergedBurst(queued.context, emptyList())
+        val burst = source.burst(target.key, target.conversationId, firstEventId) ?: return alone
+        val later = burst.messages.filter { it.eventId != firstEventId }
+        if (later.isEmpty()) return alone
+        // Il log della raffica è limitato: se il primo messaggio ne è uscito, il suo testo viene
+        // dall'evento stesso, così né lui né l'ultimo (di solito la vera domanda) si perdono.
+        val texts = if (burst.messages.any { it.eventId == firstEventId }) {
+            burst.messages.map { it.text }
+        } else {
+            listOfNotNull(target.event.text) + later.map { it.text }
         }
-        if (burst.messages.size < 2) return queued.context
-        val merged = mergeBurstTexts(burst.messages.map { it.text }) ?: return queued.context
-        return queued.context.copy(event = target.event.copy(text = merged))
+        val merged = mergeBurstTexts(texts) ?: return alone
+        return MergedBurst(
+            context = queued.context.copy(event = target.event.copy(text = merged)),
+            absorbed = later.map { it.eventId },
+        )
     }
 
-    private fun rememberAbsorbed(eventId: TriggerEventId) {
-        absorbedEventIds.add(eventId)
-        while (absorbedEventIds.size > MAX_ABSORBED_EVENT_IDS) {
-            val oldest = absorbedEventIds.iterator()
+    private fun absorbedKey(context: FireContext, eventId: TriggerEventId): AbsorbedKey =
+        AbsorbedKey(context.automationId, context.approvalFingerprint, context.actionPath, eventId)
+
+    private fun rememberAbsorbed(context: FireContext, eventIds: List<TriggerEventId>) {
+        eventIds.forEach { absorbedEvents.add(absorbedKey(context, it)) }
+        while (absorbedEvents.size > MAX_ABSORBED_EVENT_IDS) {
+            val oldest = absorbedEvents.iterator()
             oldest.next()
             oldest.remove()
         }
     }
+
+    /** Contesto per il modello e messaggi della raffica che la risposta copre oltre al primo. */
+    private class MergedBurst(val context: FireContext, val absorbed: List<TriggerEventId>)
+
+    /** Messaggio coperto dalla risposta di UNA azione reply di UNA revisione approvata di una regola. */
+    private data class AbsorbedKey(
+        val automationId: AutomationId,
+        val fingerprint: ApprovalFingerprint,
+        val actionPath: String,
+        val eventId: TriggerEventId,
+    )
 
     /** Messaggi in ordine cronologico separati da newline; se eccedono il tetto restano i più recenti. */
     private fun mergeBurstTexts(texts: List<String>): String? {
@@ -705,6 +773,9 @@ class AndroidGenerativeLane(
 
     private companion object {
         const val DEFAULT_CAPACITY = 8
+
+        /** 0.8: una risposta fuori dalla forma approvata vale un solo nuovo tentativo. */
+        const val CONSTRAINED_ATTEMPTS = 2
         const val DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 5_000L
 
         /** D8: silenzio che chiude una raffica e tetto massimo dal primo messaggio. */

@@ -170,6 +170,10 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
   `CodeBlock(parts: List<CodePart>, …)` con `CodePart(text, tone: CodeTone)`; `CodeTone`: `Plain`, `External` (ambra: valore
   esterno non attendibile), `Local`. Monospace, INTEGRALE, va a capo anche dentro i token lunghi, nessuna ellissi, nessun
   scroll nascosto (invariante 6). `ShellCommandBlock(cmd)` (in `RuleCard.kt`) è questo blocco con l'etichetta dei privilegi.
+- `rememberRevealed(text): AnnotatedString` (0.7.2): i caratteri invisibili e di direzione (Cf, Zl, Zp, controlli tranne a capo
+  e tab, surrogati spaiati; elenco in `presentation/VisibleText`) diventano un marcatore visibile `⟨U+202E⟩` su
+  `semantic.error`. Ogni `CodeTone` di `CodeBlock` passa di qui, e così ogni testo che dice cosa esegue una regola (trigger,
+  condizioni, azioni, variabili, package in `AppRefLine`) in `RuleCard`, `ApprovalRule` e `ChatDraftCard`.
 
 ### Banner e tessere di salute · `Banners.kt`, `HealthTile.kt`
 - `HealthBanner(text, tone: BannerTone, icon, onClick?, onClickLabel?)`: tutto il banner è un pulsante ≥ 56 dp.
@@ -216,7 +220,10 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
 - `TransportConfigurationSheet(transport, onDismiss, onSaveBridge, onSaveProvider, providerChoices, onSelectProvider)`:
   UN foglio per Hermes e per i provider diretti (sostituisce i due dialoghi). La chiave/il bearer non si mostrano mai: campo
   sempre vuoto (`remember`, mai `rememberSaveable`), chip «Chiave configurata», «Lascia vuoto per conservare la chiave attuale.».
-  Con `providerChoices` vuoto (onboarding) la scelta del provider non si ripete nel foglio.
+  Con `providerChoices` vuoto (onboarding) la scelta del provider non si ripete nel foglio. 0.7.2: `onRemoveKey` aggiunge
+  «Rimuovi chiave» (testo, solo con una chiave salvata); se l'indirizzo cambia origine (schema, host, porta effettiva) il chip
+  «Chiave configurata» sparisce, compare il suggerimento `provider_key_origin_changed_hint` / `bridge_token_origin_changed_hint`
+  e il salvataggio toglie la chiave.
 - Log: `LogFilter` (`presentation/`) filtra le righe gia' caricate per esito, solo nella schermata.
 
 ## 3. Regole
@@ -261,3 +268,98 @@ Componenti aggiunti per le tavole «Approvazione · generativa», «Approvazione
 Regole del blocco: «Arma» è l'unico pulsante pieno; con un ERROR è disabilitato e il motivo sta sopra i pulsanti
 (`ArgusActionFooter`). Nel dettaglio salvato «Disattiva» è tonale, Elimina è distruttivo (conferma) e «Esegui ora» resta visibile,
 disabilitato col suo motivo. Una regola armata non si modifica mai da qui: «Cambia app» ne fa una bozza di modifica da riapprovare.
+
+## 6. Componenti di 0.7.2 e 0.8
+
+Nessun token nuovo: il tema non è cambiato. Icone nuove in `IconKeys` per il vocabolario 0.8: `calendar` (Event), `alarm`
+(Alarm), `app_usage` (Timer), `user_mode` (Person), `ask` (QuestionAnswer), `stored` (Save), `reply` (Reply), `sms` (Sms),
+`send_intent` (Share), `screen_call` (CallEnd); una chiave sconosciuta resta Bolt.
+
+### Approvazione · `ApprovalRule.kt`
+- Sotto QUANDO, righe `TriggerNote(icon, text)` (icona `primary` 20 dp, `bodyMedium`; generalizza la vecchia etichetta del
+  geofence): il cooldown (HourglassTop), la conferma prima di eseguire (CheckCircle), la fine di una regola-intervallo
+  (SwapHoriz). Le azioni di fine sono un `ProgramLevel` su `surfaces.card`: la regola-intervallo si legge come UNA regola.
+
+### Cosa cambia · `RuleChanges.kt`
+- `RuleChangesCard(rows: List<RuleChangeRow>)`: sopra la regola quando la bozza sostituisce una regola approvata. Righe
+  raggruppate per `SectionLabel` (QUANDO con il cooldown, SOLO SE, VARIABILI, ALLORA), filetto `outlineVariant` tra i gruppi;
+  `StatusChip` per tipo: aggiunta `semantic.armed` + Add, tolta `semantic.error` + Remove (riga barrata), cambiata
+  `semantic.pending` + Edit con «Prima» `onSurfaceVariant` e «Ora» `onSurface`. Un comando shell è sempre un `CodeBlock` intero.
+  Lista vuota: «non cambia nulla».
+
+### Etichette e ricerca · `LabelControls.kt`, `RuleLabelsSection.kt`
+- `ArgusSearchField(value, onValueChange, placeholder, clearDescription)`: pillola su `surfaces.field`, icona Search
+  `onSurfaceVariant`, «x» (`ArgusIconButton`) solo con del testo, `ImeAction.Search`.
+- `LabelFilterChip(text, selected, onClick, contentDescription, paused)`: pillola 48 dp, scelta `primary`/`onPrimary`,
+  altrimenti bordo `outline`; PauseCircle quando il gruppo è in pausa; `Role.RadioButton`.
+- `LabelGroupCard(title, subtitle, paused, pauseLabel, resumeLabel, onTogglePause)`: `secondaryContainer`, `ArgusRadius.Xxl`,
+  sottotitolo `surfaces.heroSecondary`; Pausa/Riprendi a contorno, nessun pulsante pieno.
+- `LabelTag` (un `OutlineChip`) sulle righe, `RemovableLabelChip` nel dettaglio.
+- `RuleLabelsSection(labels, onAdd, onRemove)` + `AddLabelSheet`: chip delle etichette della regola, «Aggiungi etichetta» con
+  `disabledReason` al massimo di 5, errore immediato nel campo; nota: le etichette sono organizzazione, nessuna nuova approvazione.
+
+### Condivisione e import · `RuleShareSheet.kt`, `ImportFromText.kt`
+- `RuleShareSheet(share, onDismiss, onShareAsText, onSaveFile, onCopy)`: interruttore «Togli i dati personali» acceso di
+  default, con l'avviso (PrivacyTip `semantic.pending.fg`) quando è spento. Codice QR (encoder di ZXing, correzione M) su un
+  `Canvas` da 208 dp con 4 moduli di margine, **sempre scuro su chiaro nei due temi** (`ArgusLightColors` diretti, voluto: un
+  QR chiaro su scuro non si legge ovunque); testo troppo lungo → una nota al posto del codice. «Condividi come testo» pieno,
+  «Salva file» e «Copia» a contorno.
+- `ImportTextSheet(preview, onTextChange, onConfirm, onDismiss, onPickFile?)`: campo monospace multiriga in `remember` (può
+  contenere dati personali), «Importa» pieno solo con un'anteprima valida. `ImportPreviewCard` (nomi delle regole come testo
+  semplice), `TextImportPreviewView` (vuoto / controllo / pronto / non valido), `ProblemLine` (Error + `semantic.error.fg`,
+  regione viva). Ogni regola importata diventa una bozza da approvare.
+
+### Backup · `RulesBackupSection.kt`, `AutoBackupCard.kt`
+- `RulesBackupSection` aggiunge «Importa da testo» e, per un file cifrato, la richiesta della passphrase (campo che riparte
+  vuoto dopo un errore, `PasswordVisualTransformation`, «Apri» tonale).
+- `AutoBackupCard(state, actions)`: `ArgusCard` con `ArgusSwitch` (si spegne sempre; si accende solo con cartella e passphrase,
+  altrimenti `ReasonText`), righe cartella e passphrase, frequenza con `ArgusChoiceChip`, stato (spinner in regione viva,
+  errore con icona e `semantic.error.fg`), «Esegui ora» tonale con `disabledReason`. La passphrase si scrive in un
+  `ArgusBottomSheet` con due campi in `remember`, mai precompilati, svuotati prima del salvataggio.
+
+### Modalità e valori · `ModeControls.kt`, `ModesScreen.kt`
+- `ModeHeroPanel(label, modes, active, note, switchContentDescription, onSelect)`: `secondaryContainer`, `ArgusRadius.Xxl`,
+  intestazione `labelSmall` maiuscola, `FlowRow` in `selectableGroup`.
+- `ModeSwitchChip`: pillola 48 dp; scelta `primary` + Check (il colore non è l'unico segnale), altrimenti `secondaryContainer`
+  con bordo `outline`; `Role.RadioButton`.
+- `StoredValueRow(key, detail, value, masked, hiddenLabel, …)`: chiave in `ArgusCode`, valore in una pillola `surfaces.card2`
+  `ArgusRadius.Sm` in `ArgusCode`; un valore SECRET è `••••••` con `contentDescription` e non rientra mai nel campo di modifica.
+
+### Segreti · `SecretsScreen.kt`
+- Righe in `groupShape` con `IconBadge` Key (`primaryContainer`; `semantic.disabled` se nessuna regola lo usa), «usato da N» ·
+  ultimo uso; menu Sostituisci / Elimina (`DestructiveConfirmDialog`); «Aggiungi» pieno; card «Come si usa» con un
+  `CodeBlock` d'esempio in cui il segreto è `CodeTone.External`.
+- Il valore è di sola scrittura: campo con `PasswordVisualTransformation`, in `remember`, svuotato prima del salvataggio, mai
+  riletto; il nome è monospace e di sola lettura quando si sostituisce.
+
+### Prova a secco · `DryRunScreen.kt`
+- Banner su `semantic.cloud` (`ArgusRadius.Lg`, Info): «non viene eseguito nulla». Scelta inizio/fine per una regola-intervallo
+  (`ArgusChoiceChip`), card dell'evento d'esempio (un `ArgusTextField` per campo, tastiera telefonica per il numero, chip
+  «scansione verificata» per l'NFC), «Prova di nuovo» tonale.
+- Passi in `groupShape(outer = 22, inner = 5)`, rientro `Large + Medium × profondità` (massimo 4); `IconBadge` 30/16 con
+  `contentDescription` per tono: fatto `armed`/Check, AI `generative`/AutoAwesome, attende `pending`/QuestionMark, bloccato
+  `needsReview`/PriorityHigh, si ferma `error`/Block, non succede `disabled`/Remove, passo di programma
+  `secondaryContainer`/Science.
+- I testi passano da `rememberRevealed`; il codice è un `CodeBlock` in `ArgusCode` con le parti esterne in `CodeTone.External`
+  (il comando shell ha l'etichetta Terminal). Le risposte simulate sono chip (anche «Nessuna risposta») o un campo libero.
+
+### Card del dettaglio · `BeforeUnlockCard.kt`, `HealthAlertsControls.kt`, `NfcTagPrompt.kt`
+- `BeforeUnlockCard(enabled, onEnabledChange)`: `IconBadge` Lock (acceso `secondaryContainer`, spento `surfaces.card2`),
+  titolo, testo e la nota «protezione più debole» sempre visibile, `ArgusSwitch`. Solo per una regola che si qualifica;
+  organizzazione, nessuna nuova approvazione.
+- `HealthAlertsSettingRow(enabled, onEnabledChange)`: stessa struttura, icona NotificationImportant, in Sistema.
+- `NfcTagPrompt(onCancel)`: dialogo «Avvicina il tag» mentre una regola `nfc_tag` si arma; un tocco fuori non lo chiude, solo
+  «Annulla» o il tag.
+
+### Schermate nuove
+Galleria modelli (`TemplateGalleryScreen.kt`), import ricevuto (`ReceivedImportScreen.kt`), Modalità, Segreti, Prova a secco:
+`surfaces.page` + `ArgusDetailTopBar`, colonna scorrevole con margini `ArgusSpacing.Large`, titolo `headlineMedium` come
+intestazione, stateless `(state, callbacks)`. Galleria: filtro per categoria (`ArgusSegmentedFilter`, solo con più di una),
+card con `TriggerContainer` del tipo, `GenerativeTag` + `CloudTag` insieme, «Usa» tonale. Import ricevuto: nulla succede finché
+non si conferma «Importa» nel footer (`ArgusActionFooter`).
+
+Scostamenti noti dalle regole sopra, da riallineare: padding e misure scritti a mano (14/12/10/6 dp, `ArgusRadius.Md - 2.dp`)
+in `BeforeUnlockCard`, `HealthAlertsControls` e `LabelControls`; `LabelGroupCard` usa un `Button` M3 con contenitore
+trasparente invece di `ArgusButton`; `NfcTagPrompt` usa `AlertDialog`/`TextButton` M3 e `@Preview` semplice invece di
+`@ArgusThemePreviews` (come le anteprime nuove di `RulesBackupSection`); `StoredValueRow` taglia un valore lungo a 3 righe senza
+segnalarlo.

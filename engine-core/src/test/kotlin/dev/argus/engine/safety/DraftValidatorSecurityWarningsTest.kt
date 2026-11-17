@@ -2,9 +2,15 @@ package dev.argus.engine.safety
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SettingNamespace
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.TriggerField
 import dev.argus.engine.model.VarBinding
@@ -105,6 +111,113 @@ class DraftValidatorSecurityWarningsTest {
             vars = listOf(smsBody),
         )
         assertTrue("write_setting_external_value" in warnings(inKey))
+        assertTrue("write_setting_key_interpolated" in errors(inKey))
+    }
+
+    @Test
+    fun `the setting key must be literal even with a trusted variable`() {
+        val d = draft(
+            actions = listOf(Action.WriteSetting(SettingNamespace.SECURE, "\${fixed}", "1")),
+            vars = listOf(VarBinding.Literal("fixed", "adb_enabled", VarType.TEXT, ConfidentialityLabel.PUBLIC)),
+        )
+        assertTrue("write_setting_key_interpolated" in errors(d))
+        assertFalse("write_setting_key_invalid" in errors(d))
+    }
+
+    @Test
+    fun `keys that hand over notifications, autofill, the assistant or the network are high impact`() {
+        val keys = listOf(
+            SettingNamespace.SECURE to "enabled_notification_listeners",
+            SettingNamespace.SECURE to "autofill_service",
+            SettingNamespace.SECURE to "credential_service",
+            SettingNamespace.SECURE to "assistant",
+            SettingNamespace.SECURE to "voice_interaction_service",
+            SettingNamespace.SECURE to "mock_location",
+            SettingNamespace.GLOBAL to "http_proxy",
+            SettingNamespace.GLOBAL to "global_http_proxy_host",
+            SettingNamespace.GLOBAL to "global_http_proxy_port",
+            SettingNamespace.GLOBAL to "private_dns_mode",
+            SettingNamespace.GLOBAL to "private_dns_specifier",
+        )
+        for ((namespace, key) in keys) {
+            assertTrue("write_setting_high_impact" in warnings(draft(listOf(Action.WriteSetting(namespace, key, "x")))), key)
+        }
+    }
+
+    @Test
+    fun `text read from a parametric state reader counts as external data`() {
+        val ssid = VarBinding.State(
+            "ssid",
+            StateQuery.DumpsysField("wifi", "SSID"),
+            StateValueType.TEXT,
+            StateQueryPolicy.VERSION,
+            ConfidentialityLabel.SECRET,
+        )
+        val written = draft(
+            actions = listOf(Action.WriteSetting(SettingNamespace.GLOBAL, "device_name", "\${ssid}")),
+            vars = listOf(ssid),
+        )
+        assertTrue("write_setting_external_value" in warnings(written))
+        val shell = draft(actions = listOf(Action.RunShell("sh -c \"log \${ssid}\"")), vars = listOf(ssid))
+        assertTrue("interpolation_shell_reevaluated" in errors(shell))
+        // Un numero letto dallo stesso reader resta fidato: niente avvisi sul comando.
+        val level = ssid.copy(name = "level", valueType = StateValueType.NUMBER)
+        val numeric = draft(actions = listOf(Action.RunShell("[ \${level} -gt 3 ] && sh -c \"log \${level}\"")), vars = listOf(level))
+        assertTrue(errors(numeric).none { it.startsWith("interpolation_") }, errors(numeric).toString())
+        assertFalse("interpolation_shell_numeric" in warnings(numeric))
+    }
+
+    // --- open_url ----------------------------------------------------------------------------------
+
+    @Test
+    fun `an url with a name or credentials before the host is rejected`() {
+        listOf(
+            "https://bank.example@other.example/",
+            "https://user:pass@example.com",
+            "https://bank.example@\${body}/",
+        ).forEach { url ->
+            val d = draft(listOf(Action.OpenUrl(url)), trigger = sms, vars = listOf(smsBody))
+            assertTrue("url_userinfo" in errors(d), url)
+            assertFalse("url_invalid" in errors(d), url)
+        }
+        listOf(
+            "https://example.com/mail?to=a@b.example&q=\${body}",
+            "https://example.com/\${body}",
+            "https://example.com",
+        ).forEach { url ->
+            val fine = draft(listOf(Action.OpenUrl(url)), trigger = sms, vars = listOf(smsBody))
+            assertFalse("url_userinfo" in errors(fine), url)
+            assertFalse("url_invalid" in errors(fine), url)
+        }
+    }
+
+    // --- caratteri invisibili ----------------------------------------------------------------------
+
+    @Test
+    fun `invisible or direction changing characters in authority fields raise a warning`() {
+        val hidden = listOf(
+            Action.RunShell("echo safe\u202E"),
+            Action.RunShell("echo a\u200Bb"),
+            Action.RunShell("echo a\rb"),
+            Action.OpenUrl("https://example.com/\u2066x"),
+            Action.HttpRequest(HttpMethod.GET, "https://example.com/\u00ADx"),
+            Action.HttpRequest(HttpMethod.GET, "https://example.com/x", headers = mapOf("X-Note" to "a\u2028b")),
+            Action.WriteSetting(SettingNamespace.SYSTEM, "screen_off_timeout", "30000\u2029"),
+        )
+        hidden.forEach { action ->
+            assertTrue("invisible_characters" in warnings(draft(listOf(action))), action.toString())
+        }
+        val visible = listOf(
+            Action.RunShell("echo a\tb\necho c"),
+            Action.RunShell("echo caffè €"),
+            Action.OpenUrl("https://example.com/x"),
+        )
+        visible.forEach { action ->
+            assertFalse("invisible_characters" in warnings(draft(listOf(action))), action.toString())
+        }
+        // Dentro un if annidato vale lo stesso.
+        val nested = Action.If(Condition.StateCompare(StateQuery.Builtin("wifi"), StateValueType.TEXT, CmpOp.EQ, "on"), then = listOf(Action.RunShell("echo \u202E")))
+        assertTrue("invisible_characters" in warnings(draft(listOf(nested))))
     }
 
     @Test
@@ -185,5 +298,47 @@ class DraftValidatorSecurityWarningsTest {
             vars = listOf(literal),
         )
         assertFalse("interpolation_shell_context" in warnings(d))
+    }
+
+    // --- S2/S3: numeri, posizione del comando, comandi che rileggono --------------------------------
+
+    @Test
+    fun `external data in command position or in a reevaluating command is an error`() {
+        for (command in listOf("\${out}", "echo hi; \${out} -x", "env \${out}")) {
+            val d = shellDraft(command)
+            assertTrue("interpolation_shell_command_position" in errors(d), command)
+        }
+        for (command in listOf("sh -c \"echo \${out}\"", "su -c '\${out}'", "eval echo \${out}", "echo \${out} | sh")) {
+            val d = shellDraft(command)
+            assertTrue("interpolation_shell_reevaluated" in errors(d), command)
+            assertFalse("interpolation_shell_context" in warnings(d), command)
+        }
+    }
+
+    @Test
+    fun `a trusted variable in command position or inside sh -c raises nothing`() {
+        val d = draft(
+            actions = listOf(Action.RunShell("\${fixed} 5; sh -c \"sleep \${fixed}\"")),
+            vars = listOf(literal),
+        )
+        assertTrue(errors(d).none { it.startsWith("interpolation_shell") }, errors(d).toString())
+        assertTrue(warnings(d).none { it.startsWith("interpolation_shell") }, warnings(d).toString())
+    }
+
+    @Test
+    fun `external data where the shell computes a number raises a whole number warning`() {
+        for (command in listOf("[ \${out} -gt 5 ] && echo big", "(( \${out} > 5 ))", "let n=\${out}")) {
+            val d = shellDraft(command)
+            assertTrue("interpolation_shell_numeric" in warnings(d), command)
+            assertTrue(errors(d).none { it.startsWith("interpolation_shell") }, command)
+        }
+        assertTrue("interpolation_shell_context" in warnings(shellDraft("[ x\${out} -eq 1 ]")))
+    }
+
+    @Test
+    fun `external data that may be read as an option raises a warning unless a double dash precedes it`() {
+        assertTrue("interpolation_shell_option" in warnings(shellDraft("rm \${out}")))
+        assertFalse("interpolation_shell_option" in warnings(shellDraft("rm -- \${out}")))
+        assertFalse("interpolation_shell_option" in warnings(shellDraft("echo x\${out}")))
     }
 }

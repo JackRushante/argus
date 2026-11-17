@@ -1,15 +1,24 @@
 package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AskPolicy
+import dev.argus.engine.model.LlmOutputPolicy
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.FeatureGates
 import dev.argus.engine.model.HttpRequestPolicy
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.IntentExtraType
 import dev.argus.engine.model.InterpolationPolicy
+import dev.argus.engine.model.NotificationActionPolicy
 import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.ShellQuoting
+import dev.argus.engine.model.StoredOp
+import dev.argus.engine.model.StoredValuePolicy
+import dev.argus.engine.model.UserModePolicy
 import dev.argus.engine.model.TaintPolicy
+import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.engine.model.UiStep
 import dev.argus.engine.model.UiStepsPolicy
 import dev.argus.engine.model.ValueProvenance
@@ -37,6 +46,12 @@ class ResolvedProgramAction internal constructor(
     val inputIntegrity: IntegrityLabel,
     val inputConfidentiality: ConfidentialityLabel,
     val inputProvenance: Set<ValueProvenance>,
+    /**
+     * 0.8 «Prova a secco»: per ogni campo template (etichetta di [InterpolationPolicy.textFields]) le parti
+     * del testo risolto che vengono da un valore TAINTED, nella forma in cui sono entrate (tra apici, con
+     * escape). Solo osservabilità: nessun esecutore la legge.
+     */
+    val taintedRanges: Map<String, List<IntRange>> = emptyMap(),
 ) {
     override fun toString(): String =
         "ResolvedProgramAction(type=${action::class.simpleName}, runtimeData=${runtimeData.size}, values=<redacted>)"
@@ -55,11 +70,15 @@ sealed interface ActionResolution {
  *
  * Nel comando shell (`run_shell.cmd`, [InterpolationPolicy.TemplateField.shellQuoted]) un valore
  * TAINTED non viene mai inserito grezzo: lo si rende inerte con [ShellQuoting] secondo il contesto
- * del segnaposto nel template; se il contesto non è quotabile in sicurezza l'azione è bloccata con
- * `shell_quote_context`. I valori CLEAN restano come sono.
+ * del segnaposto nel template; se il contesto non è quotabile in sicurezza (posizione del comando,
+ * comando che rilegge gli argomenti, costrutti non modellati) l'azione è bloccata con
+ * `shell_quote_context`, e un valore non intero dove la shell valuta un numero con
+ * `shell_numeric_context`. I valori CLEAN restano come sono.
  */
 class TaintAwareInterpolator {
     fun resolve(action: Action, scope: VarScope): ActionResolution {
+        // 0.8 scaffold: un tipo (o un campo) dietro un FeatureGate spento non si risolve mai.
+        if (FeatureGates.blocks(action)) return ActionResolution.Blocked(FeatureGates.NOT_AVAILABLE_YET)
         val accumulator = Accumulator(action, scope)
         val resolved = try {
             when (action) {
@@ -93,9 +112,15 @@ class TaintAwareInterpolator {
                 is Action.LaunchApp -> action.copy(
                     pkg = accumulator.field("pkg", action.pkg, MAX_PACKAGE_CHARS),
                 )
-                is Action.OpenUrl -> action.copy(
-                    url = accumulator.field("url", action.url, MAX_TEXT_CHARS),
-                )
+                is Action.OpenUrl -> {
+                    val url = accumulator.field("url", action.url, MAX_TEXT_CHARS)
+                    // Con l'host scritto nel template, i dati inseriti dopo non possono cambiarlo.
+                    val approvedHost = literalHost(action.url)
+                    if (approvedHost != null && !approvedHost.equals(hostOf(url), ignoreCase = true)) {
+                        throw ResolutionException("url_host_changed")
+                    }
+                    action.copy(url = url)
+                }
                 is Action.ShowNotification -> action.copy(
                     title = accumulator.field("title", action.title, MAX_TITLE_CHARS),
                     text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
@@ -126,7 +151,10 @@ class TaintAwareInterpolator {
                 is Action.OpenSettingsScreen -> action.copy(
                     pkg = action.pkg?.let { accumulator.field("pkg", it, MAX_PACKAGE_CHARS) },
                 )
-                is Action.WriteSetting -> action.copy(
+                // S7: la chiave è sempre letterale; un template con la chiave interpolata non si esegue.
+                is Action.WriteSetting -> if (InterpolationPolicy.containsInterpolation(action.key)) {
+                    throw ResolutionException("write_setting_key_interpolated")
+                } else action.copy(
                     key = accumulator.field("key", action.key, WriteSettingPolicy.MAX_KEY_LENGTH),
                     value = accumulator.field("value", action.value, WriteSettingPolicy.MAX_VALUE_LENGTH),
                 )
@@ -140,7 +168,7 @@ class TaintAwareInterpolator {
                     goal = accumulator.field("goal", action.goal, MAX_TEXT_CHARS, frameTaintedForBrain = true),
                 )
                 is Action.Speak -> action.copy(
-                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                    text = accumulator.field("text", action.text, MAX_SPEAK_CHARS),
                 )
                 // URL, intestazioni e content type restano quelli approvati (mai interpolati): solo il
                 // body ha segnaposto, con la codifica del suo content type (JSON, form).
@@ -162,6 +190,58 @@ class TaintAwareInterpolator {
                     },
                 )
 
+                // 0.8 scaffold: i campi template si risolvono come gli altri sink/autorità; la forma
+                // risolta di questi tipi è rifiutata da validResolvedShape finché non è implementata.
+                is Action.Ask -> action.copy(
+                    prompt = accumulator.field("prompt", action.prompt, AskPolicy.MAX_PROMPT_CHARS),
+                )
+
+                // Solo SET riempie un template; l'incremento resta il letterale approvato (mai una variabile).
+                is Action.SetStored -> if (action.op == StoredOp.SET) {
+                    action.copy(value = action.value?.let { accumulator.field("value", it, MAX_TEXT_CHARS) })
+                } else {
+                    action
+                }
+
+                is Action.NotificationReply -> action.copy(
+                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                )
+
+                is Action.SendSms -> {
+                    // Il numero viene da fuori solo come `${'$'}{var}` col numero di chi ha chiamato o scritto:
+                    // si ricontrolla la provenienza del valore e la forma del numero risolto.
+                    TelephonyActionPolicy.placeholder(action.number)?.let { name ->
+                        val provenance = scope[name]?.provenance
+                        if (provenance != null && (provenance.isEmpty() || !SENDER_PROVENANCE.containsAll(provenance))) {
+                            throw ResolutionException("sms_number_not_sender")
+                        }
+                    }
+                    val number = accumulator.field("number", action.number, MAX_SHORT_TEXT)
+                    if (!TelephonyActionPolicy.isValidNumber(number)) throw ResolutionException("sms_number_invalid")
+                    action.copy(
+                        number = number,
+                        text = accumulator.field("text", action.text, TelephonyActionPolicy.MAX_SMS_CHARS),
+                    )
+                }
+
+                is Action.SendIntent -> action.copy(
+                    extras = action.extras.mapIndexed { index, extra ->
+                        if (extra.type == IntentExtraType.STRING) {
+                            extra.copy(value = accumulator.field("extras.$index.value", extra.value, MAX_TEXT_CHARS))
+                        } else {
+                            extra
+                        }
+                    },
+                )
+
+                is Action.SetUserMode -> action
+
+                is Action.NotificationAction -> action
+
+                is Action.CallNumber -> action
+
+                is Action.ScreenCall -> action
+
                 // I contenitori non sono azioni foglia e non devono mai arrivare al runner.
                 is Action.If, is Action.While -> throw ResolutionException("control_flow_not_leaf")
             }
@@ -178,6 +258,7 @@ class TaintAwareInterpolator {
     ) {
         private val inputs = mutableListOf<VarValue>()
         private val runtimeByVariable = linkedMapOf<String, RuntimeDataBinding>()
+        private val tainted = linkedMapOf<String, MutableList<IntRange>>()
 
         fun field(
             label: String,
@@ -224,6 +305,7 @@ class TaintAwareInterpolator {
                         throw ResolutionException("taint_blocked")
                     }
                     inputs += value
+                    val valueStart = length
                     if (frameTaintedForBrain && value.integrity == IntegrityLabel.TAINTED) {
                         val binding = runtimeByVariable.getOrPut(name) {
                             val token = "ARGUS_RUNTIME_DATA_${runtimeByVariable.size + 1}"
@@ -231,10 +313,13 @@ class TaintAwareInterpolator {
                         }
                         append("{{").append(binding.token).append("}}")
                     } else if (shellContext != null && value.integrity == IntegrityLabel.TAINTED) {
-                        // D1: un dato esterno entra nel comando solo come argomento inerte.
+                        // D1: un dato esterno entra nel comando solo come argomento inerte. Dove la
+                        // shell lo valuta come numero (S2) gli apici non bastano: deve essere un intero.
                         append(
-                            ShellQuoting.render(value.text, shellContext)
-                                ?: throw ResolutionException("shell_quote_context"),
+                            ShellQuoting.render(value.text, shellContext) ?: throw ResolutionException(
+                                if (shellContext == ShellQuoting.Context.NUMERIC) "shell_numeric_context"
+                                else "shell_quote_context",
+                            ),
                         )
                     } else if (jsonInString != null) {
                         // Body JSON: dentro una stringa il valore entra come contenuto con escape (non può
@@ -253,6 +338,9 @@ class TaintAwareInterpolator {
                         append(HttpRequestPolicy.formEncode(value.text))
                     } else {
                         append(value.text)
+                    }
+                    if (value.integrity == IntegrityLabel.TAINTED && length > valueStart) {
+                        tainted.getOrPut(label) { mutableListOf() } += valueStart until length
                     }
                     cursor = match.range.last + 1
                 }
@@ -275,6 +363,7 @@ class TaintAwareInterpolator {
                 inputIntegrity = integrity,
                 inputConfidentiality = confidentiality,
                 inputProvenance = inputs.flatMapTo(linkedSetOf()) { it.provenance },
+                taintedRanges = tainted.mapValues { (_, ranges) -> ranges.toList() },
             )
         }
     }
@@ -288,16 +377,39 @@ class TaintAwareInterpolator {
         const val MAX_PACKAGE_CHARS = 255
         const val MAX_TITLE_CHARS = 120
         const val MAX_TEXT_CHARS = 4_000
+
+        /** Lo stesso limite che il DraftValidator applica al template di `speak`. */
+        const val MAX_SPEAK_CHARS = 1_000
         const val MAX_COMMAND_CHARS = 8_192
 
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
+        /** Provenienze del numero di chi ha chiamato o scritto: le sole ammesse come destinatario di un SMS. */
+        val SENDER_PROVENANCE = setOf(ValueProvenance.PHONE, ValueProvenance.SMS)
+
+        /**
+         * Host del template `open_url` quando è letterale: ogni segnaposto viene dopo il `/`, `?` o `#`
+         * che chiude l'autorità. Null se l'host dipende da un segnaposto o il template non ha forma URL.
+         */
+        fun literalHost(template: String): String? {
+            if (!InterpolationPolicy.containsInterpolation(template)) return null
+            val authorityStart = template.indexOf("://").takeIf { it > 0 }?.plus(3) ?: return null
+            val authorityEnd = template.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+                .takeIf { it >= 0 } ?: return null
+            if (template.indexOf("\${").let { it in 0 until authorityEnd }) return null
+            return hostOf(template.substring(0, authorityEnd))
+        }
+
+        fun hostOf(url: String): String? = runCatching { URI(url).host }.getOrNull()
+
         fun validResolvedShape(action: Action): Boolean = when (action) {
             is Action.SetRinger -> action.mode in setOf("normal", "vibrate", "silent")
             is Action.LaunchApp -> PACKAGE_NAME.matches(action.pkg)
+            // Niente `utente@host`: si leggerebbe come l'host prima della chiocciola.
             is Action.OpenUrl -> runCatching {
                 val uri = URI(action.url)
-                uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
+                uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() &&
+                    uri.rawUserInfo == null
             }.getOrDefault(false)
             is Action.ShowNotification -> action.title.isNotBlank() &&
                 action.title.length <= MAX_TITLE_CHARS && action.text.length <= MAX_TEXT_CHARS
@@ -314,12 +426,13 @@ class TaintAwareInterpolator {
             }
             is Action.WriteSetting -> WriteSettingPolicy.valid(action)
             is Action.InvokeLlm -> action.goal.isNotBlank() && action.goal.length <= MAX_TEXT_CHARS &&
-                (action.notificationTitle == null || action.notificationTitle.isNotBlank())
+                (action.notificationTitle == null || action.notificationTitle.isNotBlank()) &&
+                (action.output == null || LlmOutputPolicy.validSpec(action.output))
             is Action.InvokeLlmV2 -> action.goal.isNotBlank() && action.goal.length <= MAX_TEXT_CHARS
             is Action.CopyToClipboard -> action.extractionRegex == null ||
                 SafeExtractionRegex.isValid(action.extractionRegex)
             is Action.CopyText -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
-            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
+            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_SPEAK_CHARS
             is Action.HttpRequest -> HttpRequestPolicy.isResolvedShapeValid(action)
             is Action.UiSteps -> UiStepsPolicy.isResolvedShapeValid(action)
             is Action.SetBrightness -> (action.level == null) != (action.auto == null) &&
@@ -346,6 +459,34 @@ class TaintAwareInterpolator {
             // 0.5.1: forma e bersagli vietati (Argus, package di sistema essenziali, permesso fuori elenco).
             is Action.AppControl, is Action.AppPermission -> PrivilegedActionPolicy.isShapeValid(action)
             is Action.If, is Action.While -> false
+            // 0.8 scaffold: forma risolta non ancora definita ⇒ fail-closed anche a interruttore acceso.
+            // Chi implementa il tipo scrive qui il suo controllo (gli stessi limiti del validator).
+            // 0.8: domanda risolta entro 120 caratteri, scelte e attesa approvate (gli stessi limiti del validator).
+            is Action.Ask -> AskPolicy.validResolved(action)
+
+            // 0.8: chiave letterale valida; SET con un valore di al massimo 1024 caratteri, le altre senza
+            // valore (INCREMENT: solo un intero letterale). Il tipo lo ricontrolla StoredValueOps.
+            is Action.SetStored -> StoredValuePolicy.validKey(action.key) && when (action.op) {
+                StoredOp.SET -> action.value != null && action.value.length <= StoredValuePolicy.MAX_VALUE_CHARS
+                StoredOp.INCREMENT -> action.valueType == null &&
+                    (action.value == null || StoredValuePolicy.INCREMENT_LITERAL.matches(action.value))
+                StoredOp.TOGGLE, StoredOp.CLEAR -> action.value == null && action.valueType == null
+            }
+
+            is Action.SetUserMode -> UserModePolicy.validLiteral(action.mode)
+
+            is Action.NotificationReply -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
+
+            is Action.NotificationAction -> NotificationActionPolicy.isShapeValid(action)
+
+            is Action.SendSms -> TelephonyActionPolicy.isValidNumber(action.number) && action.text.isNotBlank() &&
+                action.text.length <= TelephonyActionPolicy.MAX_SMS_CHARS
+
+            is Action.CallNumber -> TelephonyActionPolicy.isValidNumber(action.number)
+
+            is Action.SendIntent -> TelephonyActionPolicy.intentProblems(action, resolved = true).isEmpty()
+
+            is Action.ScreenCall -> true
         }
     }
 }

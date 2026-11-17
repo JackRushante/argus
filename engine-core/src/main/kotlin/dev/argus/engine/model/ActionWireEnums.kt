@@ -64,3 +64,59 @@ object AppControlOpSerializer : CaseInsensitiveEnumSerializer<AppControlOp>(
     "dev.argus.engine.model.AppControlOp",
     AppControlOp.entries.toTypedArray(),
 )
+
+// --- 0.8 scaffold: enum chiusi delle azioni nuove (spente finché il loro FeatureGate è off). ---
+
+/** Operazione di [Action.SetStored] su un valore conservato fra le esecuzioni. */
+@kotlinx.serialization.Serializable(with = StoredOpSerializer::class)
+enum class StoredOp { SET, INCREMENT, TOGGLE, CLEAR }
+
+/** Operazione di [Action.NotificationAction] sulla notifica che ha fatto scattare la regola. */
+@kotlinx.serialization.Serializable(with = NotificationActionOpSerializer::class)
+enum class NotificationActionOp { DISMISS, SNOOZE, CLICK }
+
+/** Come [Action.SendIntent] consegna l'Intent: `sendBroadcast`, `startActivity` o `startService`. */
+@kotlinx.serialization.Serializable(with = IntentKindSerializer::class)
+enum class IntentKind { BROADCAST, ACTIVITY, SERVICE }
+
+/** Tipo di un [IntentExtra]: il valore testuale si converte in questo tipo allo scatto. */
+@kotlinx.serialization.Serializable(with = IntentExtraTypeSerializer::class)
+enum class IntentExtraType { STRING, INT, LONG, BOOLEAN, FLOAT }
+
+/** Decisione di [Action.ScreenCall] su una chiamata in arrivo. */
+@kotlinx.serialization.Serializable(with = ScreenCallOpSerializer::class)
+enum class ScreenCallOp { REJECT, SILENCE }
+
+/** Forma dell'uscita del modello chiesta da [OutputSpec] in [Action.InvokeLlm]. */
+@kotlinx.serialization.Serializable(with = OutputKindSerializer::class)
+enum class OutputKind { CHOICE, NUMBER, BOOLEAN }
+
+object StoredOpSerializer : CaseInsensitiveEnumSerializer<StoredOp>(
+    "dev.argus.engine.model.StoredOp",
+    StoredOp.entries.toTypedArray(),
+)
+
+object NotificationActionOpSerializer : CaseInsensitiveEnumSerializer<NotificationActionOp>(
+    "dev.argus.engine.model.NotificationActionOp",
+    NotificationActionOp.entries.toTypedArray(),
+)
+
+object IntentKindSerializer : CaseInsensitiveEnumSerializer<IntentKind>(
+    "dev.argus.engine.model.IntentKind",
+    IntentKind.entries.toTypedArray(),
+)
+
+object IntentExtraTypeSerializer : CaseInsensitiveEnumSerializer<IntentExtraType>(
+    "dev.argus.engine.model.IntentExtraType",
+    IntentExtraType.entries.toTypedArray(),
+)
+
+object ScreenCallOpSerializer : CaseInsensitiveEnumSerializer<ScreenCallOp>(
+    "dev.argus.engine.model.ScreenCallOp",
+    ScreenCallOp.entries.toTypedArray(),
+)
+
+object OutputKindSerializer : CaseInsensitiveEnumSerializer<OutputKind>(
+    "dev.argus.engine.model.OutputKind",
+    OutputKind.entries.toTypedArray(),
+)

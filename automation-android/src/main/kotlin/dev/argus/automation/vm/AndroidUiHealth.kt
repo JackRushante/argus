@@ -36,6 +36,14 @@ internal data class AndroidUiHealth(
     val usageAccessGranted: Boolean = true,
     /** 0.5.1: il servizio di Accessibilità di Argus è acceso (macro sullo schermo). */
     val accessibilityGranted: Boolean = true,
+    /** 0.8: telefonia presente, SMS e chiamate in uscita, ruolo di filtro chiamate, contatti. */
+    val telephonyPresent: Boolean = false,
+    val sendSmsGranted: Boolean = false,
+    val callPhoneGranted: Boolean = false,
+    val callScreeningRoleHeld: Boolean = false,
+    val readContactsGranted: Boolean = false,
+    /** 0.8: READ_CALENDAR concesso (regole sul calendario). */
+    val readCalendarGranted: Boolean = false,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -72,6 +80,12 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
         // Stessa lettura reale che usa il probe: se non si riesce a leggere vale «non concesso».
         usageAccessGranted = PermanentGrantStatus.usageStats(app),
         accessibilityGranted = dev.argus.device.PermanentGrantStatus.accessibility(app),
+        telephonyPresent = dev.argus.automation.telephony.AndroidTelephonySurface.hasTelephony(app),
+        sendSmsGranted = granted(Manifest.permission.SEND_SMS),
+        callPhoneGranted = granted(Manifest.permission.CALL_PHONE),
+        callScreeningRoleHeld = dev.argus.automation.telephony.callScreeningRoleHeld(app),
+        readContactsGranted = granted(Manifest.permission.READ_CONTACTS),
+        readCalendarGranted = granted(Manifest.permission.READ_CALENDAR),
     )
 }
 

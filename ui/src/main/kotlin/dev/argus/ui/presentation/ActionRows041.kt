@@ -73,15 +73,19 @@ internal object ActionRows041 {
     fun httpRequest(a: Action.HttpRequest, l: RenderLanguage): ActionRow {
         val lines = buildList {
             // Metodo e URL INTERI, mai abbreviati: è l'indirizzo a cui escono i dati.
-            add("${a.method.name} ${a.url}")
+            // S8: ogni campo resta sulla sua riga; un a capo DENTRO un campo diventa ⏎ e non imita
+            // un'intestazione o una riga in più.
+            add("${a.method.name} ${VisibleText.singleLine(a.url)}")
             a.headers.orEmpty().forEach { (name, value) ->
-                add("$name: ${HttpRequestPolicy.displayValue(name, value)}")
+                add("${VisibleText.singleLine(name)}: ${VisibleText.singleLine(HttpRequestPolicy.displayValue(name, value))}")
             }
             // Un content type dichiarato nel campo si mostra come intestazione, se non è già nell'elenco.
             val alreadyListed = a.headers.orEmpty().keys
                 .any { it.lowercase(Locale.ROOT) == HttpRequestPolicy.CONTENT_TYPE_HEADER }
-            if (a.contentType != null && !alreadyListed) add("Content-Type: ${a.contentType}")
-            a.body?.let { add(l.pick("Body: $it", "Corpo: $it")) }
+            a.contentType?.takeIf { !alreadyListed }?.let { add("Content-Type: ${VisibleText.singleLine(it)}") }
+            a.body?.let(VisibleText::singleLine)?.let { add(l.pick("Body: $it", "Corpo: $it")) }
+            // 0.8: valori dalla cassaforte (solo i nomi) e cattura della risposta.
+            addAll(ActionRows08.httpRequestExtras(a, l))
         }
         return ActionRow(
             iconKey = "cloud",

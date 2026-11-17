@@ -62,19 +62,26 @@ The project's current philosophy is **Tasker-class power with explicit, reviewab
 ### What you can automate
 
 - **When** (triggers): a time, a date or a delay; sunrise and sunset; right now; a button, home-screen
-  shortcut, Quick Settings tile or widget you press; arriving at or leaving a place; Wi-Fi, Bluetooth or
-  the charger connecting; headphones; the screen turning on, off or being unlocked; the battery crossing
-  a level; Do Not Disturb or the ringer changing; music starting or stopping; notifications (for example
-  WhatsApp), SMS, calls and missed calls; motion.
-- **Only if** (conditions): a time window, battery, charging, screen, ringer, Do Not Disturb, Wi-Fi,
-  airplane mode, a place; with Shizuku also the app in the foreground and any Android setting or system
-  value.
+  shortcut, Quick Settings tile or widget you press; arriving at, leaving or staying in a place; Wi-Fi,
+  Bluetooth or the charger connecting; headphones; the screen turning on, off or being unlocked; the
+  battery crossing a level; Do Not Disturb or the ringer changing; music starting or stopping;
+  notifications (for example WhatsApp or Telegram), SMS, calls and missed calls; the start or end of a
+  calendar event; an NFC tag; minutes before your next alarm; time spent in an app; your mode changing;
+  motion, shaking the phone or laying it face down.
+- **Only if** (conditions): a time window, the day of the week, battery, charging, screen, ringer, Do Not
+  Disturb, Wi-Fi (also a named network), Bluetooth devices, headphones, a calendar event in progress,
+  airplane mode, a place, your mode, a value the rule kept; with Shizuku also the app in the foreground and
+  any Android setting or system value.
 - **Then** (actions): notifications, volume, ringer, Do Not Disturb, flashlight, vibration, real alarms
   and timers, opening apps, links and Settings screens, the clipboard, reading a text aloud, media keys,
-  brightness and auto-rotate, HTTP requests, WhatsApp replies (also written by the AI at fire time); with
-  Shizuku also Wi-Fi, Bluetooth and mobile data, dark mode, any setting and shell commands.
-- Rules can use variables (also the current time and date in any time zone), `if`, bounded `while`
-  loops and waits, and one switch pauses every rule.
+  brightness and auto-rotate, HTTP requests (also reading the answer, and with tokens from the secrets
+  vault), SMS and calls, Android intents, rejecting or silencing calls, replies on WhatsApp, Telegram,
+  Signal and Google Messages (also written by the AI at fire time), acting on a notification, questions
+  with buttons, your modes; with Shizuku also Wi-Fi, Bluetooth and mobile data, dark mode, any setting and
+  shell commands.
+- Rules can use variables (also the current time and date in any time zone, and values kept between
+  runs), `if`, bounded `while` loops and waits. A rule can ask before it runs, and can last "while …"
+  and then put back what it changed. One switch pauses every rule, and a label pauses a group.
 
 ---
 
@@ -87,8 +94,8 @@ The project's current philosophy is **Tasker-class power with explicit, reviewab
 | `engine-core` | **Pure JVM** Kotlin (zero Android) | Domain models, deterministic flat/P4 runtime (`ProgramInterpreter`), variables and control flow, `TriggerMatcher`, `ConditionEvaluator`, `CronSchedule` (incl. DST), `DraftValidator`, approval fingerprints and safety policy. |
 | `brain-android` | Android library | LLM transport: `CliBridgeTransport` (Hermes bridge), `OpenAICompatTransport` (OpenAI/Gemini/OpenRouter/custom), `AnthropicMessagesTransport`. Provider catalog, encrypted key store, usage normalization. |
 | `automation-android` | Android library | Event-driven Android runtime: AlarmManager (exact/inexact), geofence, notification listener, SMS/telephony/connectivity/Bluetooth receivers, sensors, generative lane, budget/usage, ViewModel. |
-| `data` | Android library | Room persistence: automations, audit (append-only, redacted), LLM usage. |
-| `ui` | Android library | Jetpack Compose Material 3, 6 **stateless** screens (chat, list, detail/approval, log, system, onboarding) + previews. |
+| `data` | Android library | Room persistence: automations, labels, stored values and modes, audit (append-only, redacted), LLM usage; backups, sharing and templates. |
+| `ui` | Android library | Jetpack Compose Material 3, **stateless** screens (chat, list, detail/approval, log, system, onboarding, plus templates, modes, secrets and dry run) + previews. |
 | `device-tools` | Android library | Typed capabilities on top of Shizuku (device states, toggles, screen tools). |
 | `core-shizuku` | Android library | Single privileged gateway: shell UID via Shizuku, single-writer queue. |
 | `app` | Android application | `dev.argus` — Hilt, navigation, wiring of the real runtimes. |
@@ -146,7 +153,7 @@ The names below are the model's real wire discriminators (`engine-core`).
 |---|---|---|
 | `time` | exactly one of `cron` (recurring), `at` (local ISO datetime, one-shot), `afterMs` (relative delay, one-shot) and `solar` (`event` `SUNRISE\|SUNSET`, `offsetMinutes` −720…720); `tz`; `precision` `FLEXIBLE\|EXACT` | Cron with DST handling in engine-core. `afterMs` ("in 2 minutes…") schedules exact by default. Sunrise and sunset are computed on the phone, without network, for the phone's position: Argus reads it when you arm the rule and rounds it to 0.1° (about 11 km), and it never goes through the LLM. |
 | `immediate` | — | Fires once when the rule is armed. Used for "right now" one-shots without racing the clock. |
-| `notification` | `pkg`, `conversationId` (stable key, preferred), `sender` (spoofable fallback ⇒ WARNING), `isGroup`, `titleMatch`, `textMatch` | Used for WhatsApp; generative replies require 1:1 chats (`isGroup=false`) and `conversationId`. |
+| `notification` | `pkg`, `conversationId` (stable key, preferred), `sender` (spoofable fallback ⇒ WARNING), `isGroup`, `titleMatch`, `textMatch` | Any app. Replies (static or generative) go only to WhatsApp, Telegram, Signal and Google Messages, in 1:1 chats (`isGroup=false`) with a whitelisted `conversationId`; outside WhatsApp the chat is the app's conversation shortcut. Samsung Messages is refused (no stable chat key). |
 | `phone_state` | `event` `INCOMING_CALL\|CALL_ENDED\|MISSED_CALL\|SMS_RECEIVED`, `number`, `textMatch` (SMS only), `sim` `1\|2` (dual-SIM phones only) | Sender/caller ID are considered **spoofable**: never allowed to trigger shell. |
 | `connectivity` | `medium` `WIFI\|BT\|POWER`, `state` `CONNECTED\|DISCONNECTED`, `match` (e.g. SSID/device name) | POWER = power supply connected/disconnected. |
 | `screen` | `event` `ON\|OFF\|UNLOCKED` | No permission. |
@@ -156,8 +163,13 @@ The names below are the model's real wire discriminators (`engine-core`).
 | `media` | `state` `PLAYING\|STOPPED` | Any app or web page can start playback, so it never triggers shell. |
 | `app_event` | `pkg` (the Android package), `event` `OPENED\|CLOSED` | An app comes to the foreground, or leaves it (to another app or the Home screen). Needs usage access: System → "Usage data access", or "Grant permanent permissions" with Shizuku or root. Read every 2.5 s only while the screen is on, with no wake lock. Any app can open another one, so it never triggers shell. |
 | `manual` | — | Runs only when you start it: "Run now" in the rule, a home-screen shortcut, the "Argus: run rule" Quick Settings tile or the widget. Every entry point accepts only an armed `manual` rule; shortcuts and widget buttons carry a random per-rule token, and the tile waits for the phone to be unlocked. |
-| `geofence` | `lat`/`lng`/`radiusM`, `transition` `ENTER\|EXIT`, `resolveCurrentLocation` | `DWELL`/loitering are represented by the model for compatibility but rejected by the current runtime. With `resolveCurrentLocation=true`, coordinates are resolved locally at arm time and never pass through the LLM. |
-| `sensor` | `kind` `significant_motion\|stationary_detect\|motion_detect\|step_detector\|step_counter`, `minimumEventCount` | The domain reserves these low-rate families, but the production backend currently arms only `significant_motion` when the device supports it. Other kinds remain unavailable until they have dedicated backends. Minimum cooldown 60 s. |
+| `geofence` | `lat`/`lng`/`radiusM`, `transition` `ENTER\|EXIT\|DWELL`, `loiteringDelayMs`, `resolveCurrentLocation` | `DWELL` = still inside 1 to 120 minutes after a verified entry; leaving cancels it, and a pending stay survives a restart of the app. With `resolveCurrentLocation=true`, coordinates are resolved locally at arm time and never pass through the LLM. |
+| `sensor` | `kind` `significant_motion\|stationary_detect\|motion_detect\|step_detector\|step_counter\|shake\|flip_face_down`, `minimumEventCount` | The backend arms `significant_motion` when the device supports it, `shake` (a clear double shake) and `flip_face_down` (face down for about a second) from the accelerometer, **only while the screen is on**; the other kinds stay unavailable. Minimum cooldown 60 s. |
+| `calendar_event` | `phase` `START\|END`, `offsetMinutes` −120…120, `titleMatch`, `calendar` | Each matching event of the phone's calendar; all-day, declined and "free" events never count. The title can be bound as external data. Needs `READ_CALENDAR`. Invitations come from others, so it never triggers shell. |
+| `nfc_tag` | `tagId`, `resolveTag` | Touching a registered tag with the phone unlocked. With `resolveTag=true` Argus reads the tag when you arm the rule ("Hold the tag to the phone"); the id never passes through the LLM and is never logged. Shell and screen macros run only for a scan verified as coming from the system's NFC service (see [Security & privacy](#security--privacy)). |
+| `next_alarm` | `offsetMinutes` 0…180 | Minutes before the phone's next alarm, once per alarm. Any app can set an alarm, so it never triggers shell. |
+| `app_usage` | `pkg`, `minutes` 1…1440 | Today's foreground time of an app reaches the threshold; at most once a day. Same usage access as `app_event`, read only while the screen is on. Never triggers shell. |
+| `user_mode_changed` | `to` (a mode name; empty = any change) | Your active mode really changes. A rule fired by an external event can change the mode, so it never triggers shell or screen macros, and a mode change made by such a rule does not fire these rules again in the same chain. |
 
 ### Conditions
 
@@ -170,6 +182,10 @@ A single composable tree with `and` / `or` / `not` (max depth 8, max 64 conditio
 | `state_compare` | `query` (families `builtin`, `setting`, `system_property`, `sysfs`, `dumpsys_field`), `valueType` `TEXT\|NUMBER\|BOOLEAN`, `op` `EQ\|NEQ\|GT\|LT\|CONTAINS`, `expected`, `policyVersion` | **Parametric** state readers (P3): closed families, validated and fingerprinted parameters, pre-arm probe. Read-only by construction. |
 | `app_in_foreground` | `pkg` | Requires the privileged reader. |
 | `location_in` | `lat`, `lng`, `radiusM` | Location within a radius. |
+| `weekday` | `days` (`MON`…`SUN`), `tz` | Today is one of the days. |
+| `wifi_connected` / `bluetooth_connected` / `headset_connected` | `ssid` / `device` (name or MAC) / `kind` `WIRED\|BLUETOOTH\|ANY`; empty = any | Read with public APIs. A network name needs the location permissions; Bluetooth needs "Nearby devices" on Android 12+. |
+| `calendar_busy` | `titleMatch`, `calendar` | A calendar event is in progress now (same filters and exclusions as `calendar_event`). |
+| `stored_compare` / `user_mode_is` | `key`, `valueType`, `op`, `expected` / `mode` | A value kept between runs (missing = `UNKNOWN`), the active mode. |
 | `boolean_literal` / `var_compare` | literal boolean, or variable operands with `EQ\|NEQ\|GT\|LT\|CONTAINS\|IS_EVEN\|IS_ODD` | P4 flow conditions used inside `if` and bounded `while`. Numeric comparisons accept numeric text at runtime and fail closed when it is not coercible. |
 
 Fail-closed semantics: an unreadable state is `UNKNOWN` and the condition fails closed, **even under `not`**.
@@ -177,12 +193,38 @@ Fail-closed semantics: an unreadable state is `UNKNOWN` and the condition fails 
 ### P4 variables and structured flow
 
 Schema-v2 rules can bind up to 16 typed values from literals, trigger payloads, approved device-state
-readers, engine-generated `random_int`, the current time (`clock`, with a time zone and a format) and
-captured shell/model output. They support nested `if`,
+readers, engine-generated `random_int`, the current time (`clock`, with a time zone and a format), values
+kept between runs (`stored`, read once at the start, with the labels they had when written) and captured
+shell, HTTP, model and `ask` output. They support nested `if`,
 bounded `while` (literal or variable iteration count, clamped to 1–1000), and cooperative `wait`,
-with at most 64 action nodes, flow depth 4 and a hard six-hour runtime budget. Values carry integrity,
+with at most 64 action nodes, flow depth 4, 30 AI calls per run and a hard six-hour runtime budget. Values carry integrity,
 confidentiality and provenance labels; only their rendered values change at runtime—the approved
-program tree and fingerprint do not.
+program tree and fingerprint do not. A stored external value stays external wherever it is read again.
+
+### Spans, confirmation and questions
+
+- **Spans** — `exit: {trigger, restore, actions}` turns a rule into "while … then put it back": it starts
+  on its trigger and ends on `exit.trigger`. Before each start action Argus records the value it is about
+  to change (volume per stream, ringer, Do Not Disturb, brightness and auto-brightness, rotation, Wi-Fi,
+  Bluetooth, mobile data, airplane mode, location, NFC, battery saver, dark mode, flashlight, a written
+  setting, the mode); at the end, with `restore`, it puts them back in reverse order and then runs the end
+  actions. A start that fires again while the rule is in progress records nothing new. A value you change
+  by hand in the meantime is still restored (approval says so); disabling, deleting or editing a rule in
+  progress restores first. The end trigger is checked like the start one, including the shell rules.
+- **`confirm`** — when the rule fires and its conditions pass, a notification asks "Run" or "Cancel";
+  no answer within `timeoutMs` (30 s to 60 min, default 5 min) means it does not run, audited with its own
+  code. The pending event survives a restart within its time. Not on one-shot triggers; on a span it
+  applies to the start only.
+- **`ask`** — a notification with 2 to 4 buttons (up to 24 characters each); the tapped answer, one of the
+  approved literals, goes into a variable. Without an answer: `defaultChoice`, or the program stops.
+  The program resumes after the app is killed. Refused among the end actions of a span.
+- **Constrained AI answers** — `invoke_llm.output` (`CHOICE` 2–8 labels, `NUMBER` between `min` and
+  `max`, `BOOLEAN`) for an `invoke_llm` that captures. The trimmed answer must match exactly; anything else
+  is one retry, then the run stops with `llm_output_invalid`. The captured value is trusted, so `if` can
+  branch on it; approval lists the allowed answers.
+
+The notification buttons of `confirm` and `ask` reach Argus only through a non-exported receiver with a
+random token for each question.
 
 ### Actions
 
@@ -201,20 +243,65 @@ program tree and fingerprint do not.
 | `speak` | Reads a text aloud with the phone's text-to-speech engine (up to 1000 characters; P4 `${var}` allowed) | Base |
 | `media_control` | Media key `PLAY\|PAUSE\|PLAY_PAUSE\|NEXT\|PREVIOUS` for the app that is playing | Base |
 | `set_brightness` / `set_rotation` | Screen brightness `level` 0–100 (switches to manual) or `auto`; auto-rotate on/off | Base ("Modify system settings" access) |
-| `http_request` | `GET\|POST\|PUT\|DELETE` to a fixed https URL with fixed headers. External data enters only the body, escaped (inside JSON strings, or form-encoded); redirects only to the same host; 15 s timeout. Approval shows method and URL in full and masks secret headers; the Log keeps only the status code | Base |
+| `http_request` | `GET\|POST\|PUT\|DELETE` to a fixed https URL with fixed headers; plain `http://` only towards this phone or your own network (same address check as the Custom provider, never DNS), with a warning at approval. External data enters only the body, escaped (inside JSON strings, or form-encoded); redirects only to the same host; 15 s timeout. `captureAs` puts a 2xx response in a variable (external data, at most 4,096 characters; longer fails instead of being cut), `extract` takes one string, number or boolean by JSON pointer. `secretHeaders` / `secretQuery` add values from the secrets vault by name (see [Security & privacy](#security--privacy)). Approval shows method and URL in full and masks secret headers; the Log keeps only the status code | Base |
 | `set_dark_mode` | Light/dark/automatic system theme; accepts the lowercase compiler wire and legacy persisted uppercase values | Shizuku |
 | `app_control` | `FORCE_STOP` (`am force-stop`), `FREEZE` (`pm disable-user`, shown with a warning) or `UNFREEZE` (`pm enable`) on a literal package. Never Argus, the launcher or an essential system app (system UI, phone, Settings, Google services) | Shizuku, root or Sui |
 | `app_permission` | `pm grant` / `pm revoke` of one runtime permission from a closed list (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices). Literal package and permission; never Argus; a revoke is shown with a warning | Shizuku, root or Sui |
 | `set_airplane` / `set_location` / `set_battery_saver` / `set_nfc` | Airplane mode, location services, battery saver and NFC on/off (`cmd connectivity airplane-mode`, `cmd location set-location-enabled`, `cmd power set-mode`, `svc nfc`). `set_nfc` exists only on phones with NFC | Shizuku, root or Sui |
 | `lock_screen` / `screenshot` | Turns the screen off and locks the phone (`input keyevent KEYCODE_SLEEP`; the lock follows Android's lock settings); saves a screenshot in `Pictures/Argus` through MediaStore, named by date and time | Shizuku, root or Sui |
 | `whatsapp_reply` | WhatsApp reply via the notification's RemoteInput | Base (notification listener) |
+| `notification_reply` | The same reply for Telegram, Signal and Google Messages, to the chat that fired the rule | Base (notification listener) |
+| `notification_action` | On the notification that fired the rule: `DISMISS`, `SNOOZE` (1–1440 minutes) or `CLICK` the button whose text is exactly `label`. Never on Argus or the apps screen macros cannot touch; a button that asks for typed text is refused | Base (notification listener) |
+| `send_sms` / `call_number` | An SMS (`text` up to 480 characters after filling in) or a call to a literal number (`+` and 7–15 digits: no short codes, USSD or forwarding codes); `send_sms` may also answer the number that just called or wrote. Hard caps: 10 SMS an hour, 3 an hour to one number, 3 calls an hour, saved before sending. Approval warns that they may cost money | Base (`SEND_SMS` / `CALL_PHONE`, phones with telephony) |
+| `send_intent` | `BROADCAST`, `ACTIVITY` or `SERVICE` with literal action, package, class, data and MIME type, shown in full; only text extras may hold variables. Refuses Argus itself, call, install, uninstall, delete and reset actions, APK MIME, `file:`, `javascript:` and `intent:` data, more than 16 extras | Base; `SERVICE` with Shizuku, root or Sui |
+| `screen_call` | `REJECT` or `SILENCE` an incoming call before it rings (`phone_state` incoming-call rules only; conditions limited to clock ones), optionally `onlyUnknownCallers` (see [Security & privacy](#security--privacy)). Any doubt, error or timeout lets the call ring; every decision is audited without the number | Base (call screening role) |
+| `set_stored` | `SET`, `INCREMENT`, `TOGGLE` or `CLEAR` a value kept between runs (up to 64 keys, 1024 characters); a type mismatch changes nothing | Engine |
+| `set_user_mode` | Makes one of your modes active (System → Modes and variables, at most 12) | Engine |
+| `ask` | A question with buttons (see above) | Base (notifications) |
 | `run_shell` | Shell command template, shown in full at approval; external data enters only as one quoted argument | Shizuku |
 | `write_setting` | Parametric `settings put` on `system\|secure\|global` (any validated key/value template) | Shizuku |
 | `tap` / `input_text` | Reserved UI input primitives; rejected with `unsupported_phase` and never advertised as available | Not available |
 | `ui_steps` | Screen macro through Argus's Accessibility service: open an app, then up to 20 steps (`wait_for`, `click`, `type`, `scroll`, `back`, `home`, `check`) matched by exact text, resource id or description; 60 s at most, a "Stop" notification while it runs. Never on Argus, Settings, the package installer or permission dialogs, and only from triggers allowed to start shell | Base (Accessibility service on) |
 | `wait` / `if` / `while` | Cooperative pause and structured, bounded control flow | Engine |
-| `invoke_llm` | **Generative**: at fire time the LLM produces text for an explicit `WHATSAPP_REPLY`, `LOCAL_NOTIFICATION`, or P4 `CAPTURE_ONLY` sink. Hermes and direct providers support the resolved capture path | Base |
+| `invoke_llm` | **Generative**: at fire time the LLM produces text for an explicit `WHATSAPP_REPLY` (also the other reply apps), `LOCAL_NOTIFICATION`, or P4 `CAPTURE_ONLY` sink, optionally constrained by `output`. Hermes and direct providers support the resolved capture path | Base |
 | `invoke_llm_v2` | P3 variant with explicit state context: every reader, type and classification enters the approved fingerprint. Flat delivery is supported; nesting it inside P4 is rejected before approval | Base |
+
+### Around the rules
+
+- **Dry run** (rule detail → "Dry run"): simulates one run on a sample event you edit (sender, text,
+  number, network, new mode…). Trigger match and conditions are evaluated against the phone's current
+  state, read-only; every action goes through the real interpolator and policy checks and is recorded
+  instead of executed, so you see the final shell command, URL and body with the external parts marked,
+  and why a step would be blocked. AI calls, `ask`, `confirm` and captured output take an answer you pick.
+  Nothing is written to the Log and no cooldown is used; secrets appear by name. It does not simulate the
+  SMS and call caps, the AI budget or a cooldown in progress, and it takes no reading that needs Shizuku
+  or root (those conditions count as unknown).
+- **System → Secrets**: the vault (see [Security & privacy](#security--privacy)).
+- **System → Modes and variables**: the active mode and your modes, and the values rules keep between
+  runs, which you can edit (a value marked secret is masked). A Quick Settings tile "Argus: mode" cycles
+  the modes, and the widget has a button per mode. Renaming or deleting a mode that rules use sends them
+  to review.
+- **Labels and search**: up to 5 labels per rule (20 in all), search by name, trigger, actions and app
+  names, and a pause for a whole label group (a skipped run does not use the cooldown and is not made up
+  later). Labels are organisation: changing them needs no new approval.
+- **Sharing and templates**: share one rule as text, as a file or as a QR code, with personal data removed
+  by default (places, numbers, chats, network and device names, tag ids, intent data, secret values: the
+  importer fills them in again before arming). Import from pasted text, from a file or from another app,
+  or pick one of 12 templates. Every import becomes a draft to approve, marked as imported. When an edit
+  replaces an approved rule, approval shows what changes.
+- **Backups**: System → Rules backup exports and imports the rules, labels, modes and stored values. The
+  automatic backup writes an encrypted file to a folder you choose, daily or weekly, and keeps the last 7
+  (AES-256-GCM, key derived from your passphrase with PBKDF2-HMAC-SHA256, 600,000 rounds; the passphrase
+  is never stored). The export "without personal data" leaves out stored values and keeps only the mode
+  names.
+- **Before the first unlock** (opt-in, rule detail → "Also active before unlock"): after a restart, nothing
+  runs until the phone is unlocked once, because rules and keys live in credential-encrypted storage. A
+  rule with a repeating clock trigger (cron), only Do Not Disturb, ringer, volume, flashlight or vibration
+  actions and clock-only conditions can keep a copy in device-encrypted storage and run before that; the
+  card says the copy has weaker protection. After the unlock the normal engine takes over and imports the
+  Log entries.
+- **Health alerts** (System, on by default): a notification when a rule fails three times in a row or
+  loses something it needs (Shizuku, notification access, Accessibility, exact alarms, location).
 
 ---
 
@@ -232,7 +319,7 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 | **Custom (OpenAI-compat)** | endpoint of your choice (llama.cpp, Ollama, LiteLLM, etc.) | no | n/a |
 
 - **BYOK**: hosted direct providers require **your own** API key, entered in-app and stored encrypted on the device. A Custom endpoint may omit authentication. No Argus account, no project backend.
-- **Budget**: per-turn usage tracking (tokens and, where the price list is known, micro-USD), configurable limits; a generative rule that exceeds its budget is suppressed and audited (`SUPPRESSED_BUDGET`).
+- **Budget**: per-turn usage tracking (tokens and, where the price list is known, micro-USD), configurable limits; a generative rule that exceeds its budget is suppressed and audited (`SUPPRESSED_BUDGET`). Until you save your own limits, a global cap of 200 AI calls a day applies.
 - **On-device and local-network models**: Custom accepts unauthenticated OpenAI-compatible servers. Plain `http://` is accepted only for this phone (`localhost`, `127.0.0.0/8`, `::1`) and for your own network: private IPv4 (`10/8`, `172.16/12`, `192.168/16`), link-local `169.254/16`, CGNAT `100.64/10` (VPN meshes such as Tailscale), IPv6 ULA `fc00::/7` and link-local `fe80::/10`, and local names (`.local`, `.lan`, `.home.arpa`, `.internal`, single-label names). The check is on the address as written, never through DNS; a public host always requires HTTPS. An `http://` address off the phone shows a warning: the key and the requests travel unencrypted, so use it only on a network you trust. Every other provider, the Hermes bridge and the web requests of rules keep their rules (HTTPS; `http://` only for the exact loopback hosts in rule web requests).
 - **Local server presets**: the Custom dialog has one-tap presets for Ollama (`http://127.0.0.1:11434/v1`), LM Studio (`http://127.0.0.1:1234/v1`) and the llama.cpp server (`http://127.0.0.1:8080/v1`), with a note on the context they need (about 16,000 tokens). Local servers get a 3-minute compile timeout instead of 65 seconds. For slower models, **System → Brain → Response timeout** raises the wait for every provider (Automatic, 2, 5, 10 or 20 minutes); the HTTP client and the chat wait follow it. There is no compact prompt: models too small to write valid rules are not worth the effort.
 - **Structured output**: when the provider supports it, the compile asks for a native JSON answer (`response_format` on OpenAI-compatible endpoints, `output_config.format` on Anthropic) instead of a sentence plus an `@@META@@` line. If the provider rejects the parameter or the model ignores it, Argus falls back to the `@@META@@` protocol by itself, which stays the base.
@@ -270,6 +357,8 @@ Measured with Argus's AI test bench in October 2026, all through OpenRouter. The
 
 `ops/hermes/bridge.py` is a one-shot service meant for people who already run a self-hosted LLM agent on their own server: it exposes `POST /compile` (NL → rule draft) and strict versioned `POST /act` lanes, with bearer token, idempotent request-ids, body/output limits and fail-closed parsing. `/act` v1/v2 cover legacy and state-aware delivery; v3 carries P4 resolved runtime values in a strictly validated DATA envelope. Android requires v3 in `/health/v2`, so a stale bridge fails visibly before execution. The service binds to loopback only and should be published over HTTPS on a private network (e.g. a mesh VPN / Tailscale Serve). Follow the [step-by-step installation guide](ops/hermes/README.md); the systemd unit and `.env` template are included beside it.
 
+The bridge relays AI replies for WhatsApp, Telegram, Signal and Google Messages. It compiles only its own vocabulary: the `time`, `immediate`, `notification`, `geofence` (enter or exit), `phone_state`, `connectivity` and basic `sensor` triggers, the conditions up to `state_compare`, and the actions from `set_wifi` to `invoke_llm_v2` that existed before 0.4.1 (the list is in `docs/design/hermes-bridge-contract.md`). Argus offers the bridge only those triggers; everything else (manual, screen, battery and app triggers, reading aloud, HTTP requests, privileged actions, screen macros and all of the newer vocabulary) needs a direct provider.
+
 **The app works without the bridge**: just pick a direct provider with your own key. The bridge exists only for those who want to compile rules with their own self-hosted agent instead of a commercial API.
 
 Full contract: `docs/design/hermes-bridge-contract.md`.
@@ -283,13 +372,19 @@ The main threat model is **prompt injection from external content** (SMS, notifi
 - **Approval fingerprint** — SHA-256 (`argus-approval-v1`) of the canonical JSON of the **executable data only**; the LLM's prose is excluded from the hash. What fires is byte-for-byte what you approved; any change requires re-approval.
 - **Rendering from the types** — the approval screen shows the rule reconstructed from the domain types, never the LLM's paraphrase. Shell commands are shown in full, in monospace, never truncated.
 - **`DraftValidator`** — no draft enters the engine without validation: closed vocabularies (state keys, enums, tools), bounds on every field (lengths, ranges, condition-tree depth), hard invariants (e.g. `invoke_llm`'s `allowed_tools` can never contain `shell.run` or `automation.*` — re-checked at fire time as well).
-- **Centralized taint and egress policy** — integrity labels remain monotonic, but the **Aggressive** policy deliberately permits a TAINTED trigger/capture value in approved template fields such as URLs, packages and settings (shown in full at approval). The program structure and capabilities remain fingerprinted, but data-driven authority creates a real injection surface. In shell commands, external data always enters as a single quoted argument and never becomes command syntax. Remote egress is a separate decision: future credential-vault values are blocked from every remote Brain regardless of the taint posture, while generic `SECRET` data requires explicit review.
-- **Shell arguments are always quoted** — external data placed in an approved shell command always enters as one single-quoted argument (decision D1), so it cannot add, remove or reorder words, or otherwise change the command that was approved.
-- **`StaticShellSafety`** — `run_shell` can only be triggered by triggers with a non-forgeable identity (time, immediate, geofence, connectivity, sensor, screen, battery, audio output, mode changes, and `manual`, which only the unlocked phone's owner can start) or by a **whitelisted** WhatsApp 1:1 chat identified by a stable `conversationId`. SMS, caller ID, media playback and an app being opened or closed are excluded as a hard limit (anyone can cause them), and the approved-trigger ↔ live-event binding is verified at runtime.
+- **Centralized taint and egress policy** — integrity labels remain monotonic, but the **Aggressive** policy deliberately permits a TAINTED trigger/capture value in approved template fields such as URLs, packages and settings (shown in full at approval). The program structure and capabilities remain fingerprinted, but data-driven authority creates a real injection surface. In shell commands, external data always enters as a single quoted argument and never becomes command syntax. Remote egress is a separate decision: values from the secrets vault never become variables, so they never reach a remote Brain, while generic `SECRET` data requires explicit review.
+- **Shell arguments are always quoted** — external data placed in an approved shell command always enters as one single-quoted argument (decision D1), so it cannot add, remove or reorder words, or otherwise change the command that was approved. External data is message text, captured output and any text a parametric state reader returns (network names, media titles, device names). Where quoting cannot protect, the data is refused instead: as the name of the command, as an argument of a command that reads its arguments again as code (`sh -c`, `su`, `eval`, `xargs`, `awk`, `sed`, `find -exec`…), and, unless it is a whole number, wherever the shell evaluates arithmetic (`[ … -gt … ]`, `(( ))`, `let`) or re-reads it from a shell variable without quotes. Approval reports these cases as errors or warnings.
+- **`StaticShellSafety`** — `run_shell` can only be triggered by triggers with a non-forgeable identity (time, immediate, geofence, connectivity, sensor, screen, battery, audio output, mode changes, `manual`, which only the unlocked phone's owner can start, and a verified NFC scan) or by a **whitelisted** WhatsApp 1:1 chat identified by a stable `conversationId`. SMS, caller ID, media playback, an app being opened or closed, time spent in an app, the next alarm, calendar events and your mode changing are excluded as a hard limit (anyone, or any app, can cause them), and the approved-trigger ↔ live-event binding is verified at runtime. Screen macros follow the same rule. In a span the end trigger is checked as well.
+- **NFC scans** — background scans reach Argus through an exported activity, so another app could fake one. Shell commands and screen macros run only for a scan proven to come from the system's NFC service, which Android lets Argus check from Android 15 on; older versions cannot prove it. In practice a phone may not share that identity, so an NFC rule may never start shell or a macro. Its other actions run on any scan.
+- **SMS, calls and intents** — `send_sms` and `call_number` take a literal number, or for SMS the number that just called or wrote, checked again after filling in. Hard caps (10 SMS an hour for the whole app, 3 an hour to one number, 3 calls an hour) are saved before anything is sent; if they cannot be saved nothing is sent. Numbers in that record are kept as salted hashes. `send_intent` refuses Argus's own components, call, install, uninstall, delete and reset actions and dangerous data schemes, in the validator and again at fire time.
+- **Call screening** — `screen_call` answers within Android's deadline and fails open: on a timeout, an error or any doubt the call rings. With "only numbers not in my contacts" the option gates the whole rule: when a contact calls nothing runs, and when Argus cannot tell (no contacts permission, an error) the call rings and nothing else runs. A hidden number counts as unknown.
+- **Secrets vault** — System → Secrets keeps tokens and passwords (name `[a-z][a-z0-9_]{0,31}`, value up to 4,096 characters) encrypted with an Android Keystore key. The vault is write-only: a value can be replaced or deleted, never shown again, and it is never in UI state, logs, exceptions, backups, exports or shared rules. A rule names a secret only in `http_request.secretHeaders` / `secretQuery`; the executor adds it at fire time, only to the approved host of that request (never to a redirect to another host) and only over HTTPS or to this phone. Approval shows where each secret goes (`Authorization: Bearer ⟨secret ha_token⟩`), never its value; the AI gets the names only. What it does not protect: the value is sent to the server you named, and anyone who can approve rules on the unlocked phone can send a secret to that server. A rule naming a missing secret cannot be armed; deleting a secret sends its rules to review.
+- **Plain HTTP only on your network** — rule web requests may use `http://` only towards this phone or a private address or local name (the same check, on the address as written, as the Custom provider), with a warning at approval: the request travels unencrypted on your network. A public host always needs HTTPS.
+- **Before the first unlock** — opted-in rules are copied to device-encrypted storage, readable before the first unlock; only clock rules with base actions qualify (no personal data, no AI, no secrets, no shell, no message content), and the option is off unless you turn it on for each rule.
 - **PII-free audit log** — every fire, suppression, error and lifecycle transition (arm/disable/delete/needs-review) is recorded in append-only Room with **closed-vocabulary reason codes**: never free text, never message content; event ids are hashed.
 - **Minimization toward the Brain** — compile receives a capability manifest and a **redacted** device state (only keys from the approved registry); GPS coordinates never leave the phone (only `location_available` is sent). Generative replies are bound to the trigger's sender, whitelisted 1:1 chats only.
 - **Fail-closed everywhere** — missing state = `UNKNOWN` = condition false; ambiguous metadata (e.g. unknown `isGroup`) = not authorized; Shizuku absent = the privileged action fails cleanly and is audited, never executed "later".
-- **Keys and secrets** — API keys encrypted on-device, never in UI state, never in the repo, never in the APK; app backup disabled.
+- **Keys and secrets** — API keys encrypted on-device, never in UI state, never in the repo, never in the APK; Android's app backup disabled. A saved key never follows the provider address to another server. The automatic backup is encrypted with your passphrase; stored values marked secret go only into that encrypted backup, never into a plain export, and vault secrets go into no backup at all.
 
 ---
 
@@ -306,7 +401,11 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 | Notification access (notification listener) | `notification` trigger, WhatsApp replies | notification rules |
 | Location (fine + background) | `geofence`, `location_in` | location rules |
 | SMS / phone state / call log | `phone_state` trigger | telephony rules (separate opt-in) |
-| Nearby Bluetooth (`BLUETOOTH_CONNECT`) | BT connectivity trigger | BT rules |
+| Nearby Bluetooth (`BLUETOOTH_CONNECT`) | BT connectivity trigger, `bluetooth_connected` | BT rules |
+| Calendar (`READ_CALENDAR`) | `calendar_event`, `calendar_busy` | calendar rules ("Calendar rules" in System) |
+| Send SMS (`SEND_SMS`), phone calls (`CALL_PHONE`) | `send_sms`, `call_number` | SMS and call rules (phones with telephony) |
+| Call screening role, contacts (`READ_CONTACTS`) | `screen_call`; contacts only for "only numbers not in my contacts" | call screening rules |
+| NFC (`NFC`, normal permission) | `nfc_tag` | phones with NFC |
 | "Do Not Disturb" access | `set_dnd`, muting via volume | DND rules |
 | "Modify system settings" (`WRITE_SETTINGS`) | `set_brightness`, `set_rotation` | brightness and rotation rules ("Fix" in System) |
 | Battery optimization exemption | reliability on aggressive OEMs | recommended |
@@ -317,9 +416,9 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 
 | Tier | What it covers |
 |---|---|
-| **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, speech, media keys, HTTP requests, brightness and rotation (with "Modify system settings" access), all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
+| **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, replies and notification actions, generative actions, speech, media keys, HTTP requests and secrets, SMS and calls, broadcast and activity intents, call screening, questions, stored values and modes, brightness and rotation (with "Modify system settings" access), all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode, day of the week, headphones, calendar; Bluetooth with the Bluetooth permission on Android 12+) |
 | **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`; without it they start while the app is in the foreground, and an app, link or Settings screen otherwise becomes a "Tap to open" notification) |
-| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, app control and permissions, airplane mode, location, battery saver, NFC, lock screen, screenshot, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
+| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, app control and permissions, airplane mode, location, battery saver, NFC, lock screen, screenshot, service intents, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
 
 With Shizuku running once, System → "Grant permanent permissions" lets Argus keep `write_setting` on
 SECURE/GLOBAL, the foreground-app condition, brightness and rotation, and Do Not Disturb access after a
@@ -403,9 +502,9 @@ Thanks for trying it. Useful things to know and to stress:
 - **Compilation**: ask for rules in chat, from trivial to ambiguous ("in 2 minutes send me a notification with the EUR/USD rate", "when I leave home turn off Wi-Fi", "if my wife writes on WhatsApp after 11 pm reply for me"). Check that the draft rendered on the approval screen matches what you meant — it is the real rule, not the paraphrase.
 - **Approval**: try to get "nasty" rules proposed (shell from SMS, disallowed tools, out-of-range values) and check that the validator blocks them with a clear reason.
 - **Execution**: arm `time` rules (cron and one-shot), `immediate`, connectivity, geofence, notifications. Test the hostile cases: reboot, timezone change, DST, app killed by the OEM, Shizuku turned off midway.
-- **End-to-end suite**: `e2e/` runs 162 hand-written rules on an Android emulator with Shizuku as root, as shell and
+- **End-to-end suite**: `e2e/` runs 216 hand-written rules on an Android emulator with Shizuku as root, as shell and
   without Shizuku, through a hook that exists only in debug builds (see `e2e/README.md`).
-- **New in 0.4**: manual rules (a button, a Quick Settings tile, a widget), "Pause automations", sunrise and sunset, the screen, unlock, battery, headphones and music triggers, reading aloud, brightness and HTTP requests.
+- **New in this release**: spans ("while … then put it back"), "ask me first", questions with buttons, the dry run, secrets in HTTP requests, SMS and calls, call screening, replies on Telegram, Signal and Google Messages, calendar, NFC, next-alarm, app-usage, shake and face-down triggers, modes, automatic encrypted backups, sharing a rule. Try the dry run on every rule before arming it, and tell us when its steps differ from what the real run does.
 - **Degradation**: deny permissions and turn off Shizuku, and check that the app honestly says what it cannot do instead of failing silently.
 - **Budget** (generative rules): set a low limit and verify the audited suppression.
 
@@ -427,7 +526,7 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 Short roadmap:
 
-- **Next** — fixes and small features from user feedback; no large phase is planned after the 0.7.0 redesign.
+- **Next** — fixes and small features from user feedback, and the new vocabulary in the Hermes bridge's compile prompt.
 
 **Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16) and on an Android 16 emulator. Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.
 
@@ -436,3 +535,5 @@ Short roadmap:
 ## License
 
 Argus is released under the [GNU General Public License v3.0](LICENSE) (GPL-3.0). You are free to use, study, modify and redistribute it; derivative works must remain open under the same license.
+
+Bundled third-party components: the Roboto and JetBrains Mono fonts (SIL OFL 1.1) and the QR code encoder of ZXing core (Apache-2.0). Their licence texts are in [`docs/third-party/`](docs/third-party/).

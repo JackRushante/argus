@@ -15,6 +15,7 @@
     <string name="bridge_token_label">Bearer token</string>
     <string name="bridge_token_keep_hint">Lascia vuoto per conservare il token protetto</string>
     <string name="bridge_token_required_hint">Inserisci il bearer token</string>
+    <string name="bridge_token_origin_changed_hint">Nuovo indirizzo del server: inserisci di nuovo il bearer. Quello salvato non parte mai verso un altro server.</string>
     <string name="bridge_token_configured">Token protetto configurato</string>
     <string name="bridge_token_missing">Token non configurato</string>
 
@@ -29,6 +30,8 @@
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
     <string name="provider_key_required_hint">Obbligatoria.</string>
     <string name="provider_key_optional_hint">Opzionale per endpoint senza autenticazione.</string>
+    <string name="provider_key_origin_changed_hint">Nuovo indirizzo del server: salvando, la chiave salvata viene tolta. Inseriscila di nuovo se il nuovo server la richiede.</string>
+    <string name="provider_key_remove">Rimuovi chiave</string>
     <string name="provider_reasoning_label">Ragionamento per richiesta</string>
     <string name="provider_reasoning_default">Predefinito server</string>
     <string name="provider_reasoning_none">Disattivato</string>
@@ -121,6 +124,7 @@
     <string name="chat_input_sending">In attesa della risposta…</string>
     <string name="chat_input_placeholder">Chiedi una regola…</string>
     <string name="chat_send">Invia</string>
+    <string name="chat_dictate">Detta</string>
 
     <!-- Lista automazioni -->
     <string name="list_title">Automazioni</string>
@@ -143,11 +147,30 @@
     <string name="detail_rationale_label">descrizione del modello</string>
     <string name="detail_recent_runs">Ultime esecuzioni</string>
     <string name="detail_see_all">Vedi tutte</string>
+    <!-- 0.7.2: etichette nel dettaglio della regola. -->
+    <string name="lbl_detail_title">Etichette</string>
+    <string name="lbl_detail_none">Nessuna etichetta.</string>
+    <string name="lbl_detail_note">Le etichette servono solo a organizzare: non cambiano cosa fa la regola e non richiedono una nuova approvazione.</string>
+    <string name="lbl_detail_add">Aggiungi etichetta</string>
+    <string name="lbl_detail_remove_cd">Togli l\'etichetta %1$s</string>
+    <string name="lbl_detail_full">Una regola può avere al massimo 5 etichette.</string>
+    <string name="lbl_sheet_title">Aggiungi un\'etichetta</string>
+    <string name="lbl_sheet_existing">Le tue etichette</string>
+    <string name="lbl_sheet_new">Nuova etichetta</string>
+    <string name="lbl_sheet_placeholder">Es. Casa</string>
+    <string name="lbl_sheet_hint">Da 1 a 24 caratteri.</string>
+    <string name="lbl_sheet_invalid">Da 1 a 24 caratteri, senza caratteri invisibili.</string>
+    <string name="lbl_sheet_already">La regola ha già questa etichetta.</string>
+    <string name="lbl_sheet_too_many">Hai già 20 etichette: usane una di quelle esistenti.</string>
+    <string name="lbl_sheet_add">Aggiungi</string>
     <string name="detail_arm_blocked">Arma bloccato: %1$s</string>
     <string name="detail_not_armable">Regola non armabile</string>
     <string name="detail_reject">Rifiuta</string>
     <string name="detail_edit">Modifica</string>
     <string name="detail_arm">Arma</string>
+    <!-- 0.8: lettura del tag NFC di una regola che si sta armando -->
+    <string name="nfc_read_title">Avvicina il tag</string>
+    <string name="nfc_read_body">Appoggia il retro del telefono sul tag NFC a cui deve reagire la regola.</string>
     <string name="detail_disable">Disattiva automazione</string>
     <string name="detail_enable">Riattiva automazione</string>
     <string name="detail_edit_in_chat">Modifica in chat</string>
@@ -169,7 +192,7 @@
     <string name="log_filter_remove">Rimuovi filtro</string>
     <string name="log_expand">Espandi</string>
     <string name="log_collapse">Comprimi</string>
-    <string name="log_copy_and_open">Copia e apri WhatsApp</string>
+    <string name="log_copy_and_open">Copia e apri l\'app della chat</string>
     <string name="log_mark_sent">Segna come inviata</string>
     <string name="log_open_automation">Apri automazione</string>
     <string name="log_menu_open">Opzioni del log</string>
@@ -183,6 +206,49 @@
 
     <!-- Sistema (settings) -->
     <string name="settings_title">Sistema</string>
+    <!-- 0.8: Sistema › Modalità (modalità e variabili salvate) -->
+    <string name="settings_modes_title">Modalità e variabili</string>
+    <string name="settings_modes_subtitle">Modalità attiva, le tue modalità e le variabili che le regole conservano</string>
+    <string name="modes_title">Modalità</string>
+    <string name="modes_active_label">Modalità attiva</string>
+    <string name="modes_none_active">Nessuna modalità attiva.</string>
+    <string name="modes_switch_hint">Puoi cambiarla anche dal riquadro rapido e dal widget.</string>
+    <string name="modes_switch_cd">Passa alla modalità %1$s</string>
+    <string name="modes_list_label">Le tue modalità</string>
+    <string name="modes_empty">Aggiungi la prima modalità, per esempio Casa o Lavoro.</string>
+    <string name="modes_condition_rules_none">Nessuna regola la usa come condizione</string>
+    <plurals name="modes_condition_rules">
+        <item quantity="one">%1$d regola la usa come condizione</item>
+        <item quantity="other">%1$d regole la usano come condizione</item>
+    </plurals>
+    <string name="modes_edit_cd">Modifica la modalità %1$s</string>
+    <string name="modes_add">Aggiungi modalità</string>
+    <string name="modes_add_limit">Puoi avere al massimo 12 modalità.</string>
+    <string name="modes_add_title">Nuova modalità</string>
+    <string name="modes_edit_title">Modifica modalità</string>
+    <string name="modes_name_label">Nome</string>
+    <string name="modes_name_hint">Da 1 a 24 caratteri, per esempio Casa, Lavoro, Notte.</string>
+    <plurals name="modes_review_warning">
+        <item quantity="one">%1$d regola che la usa andrà in «da rivedere».</item>
+        <item quantity="other">%1$d regole che la usano andranno in «da rivedere».</item>
+    </plurals>
+    <string name="modes_delete">Elimina modalità</string>
+    <string name="modes_delete_title">Eliminare la modalità %1$s?</string>
+    <string name="modes_delete_unused">Nessuna regola la usa.</string>
+    <string name="modes_values_label">Variabili salvate</string>
+    <string name="modes_values_empty">Nessuna variabile salvata. Le regole che conservano un valore fra un\'esecuzione e l\'altra lo mostrano qui.</string>
+    <string name="modes_value_hidden">Valore nascosto</string>
+    <string name="modes_value_open_cd">Correggi o elimina %1$s</string>
+    <string name="modes_value_title">Variabile %1$s</string>
+    <string name="modes_value_label">Valore</string>
+    <string name="modes_value_secret_hint">Il valore attuale è nascosto: scrivine uno nuovo per sostituirlo.</string>
+    <string name="modes_value_clean_hint">Un valore scritto da te è considerato attendibile.</string>
+    <string name="modes_value_true">vero</string>
+    <string name="modes_value_false">falso</string>
+    <string name="modes_value_delete">Elimina variabile</string>
+    <string name="modes_value_delete_title">Eliminare %1$s?</string>
+    <string name="modes_value_delete_body">Le regole che la leggono la troveranno assente e si fermeranno.</string>
+    <string name="modes_footer">Una regola legge o cambia modalità e variabili solo se è scritto nella regola che hai approvato. Tocca una variabile per correggerne il valore o eliminarla.</string>
     <string name="settings_section_health">SALUTE</string>
     <string name="settings_section_transport">BRAIN · TRANSPORT</string>
     <string name="settings_section_privacy">PRIVACY</string>
@@ -207,8 +273,8 @@
     <string name="settings_notifications_ok">consentite</string>
     <string name="settings_notifications_warn">non consentite — esiti e avvisi non saranno visibili</string>
     <string name="settings_listener_title">Lettura notifiche</string>
-    <string name="settings_listener_ok">attiva — trigger WhatsApp e risposte disponibili</string>
-    <string name="settings_listener_warn">non attiva — trigger WhatsApp e risposte non armabili</string>
+    <string name="settings_listener_ok">attiva — trigger notifica e risposte disponibili</string>
+    <string name="settings_listener_warn">non attiva — trigger notifica e risposte non armabili</string>
     <string name="settings_listener_restricted_hint">Se Android dice \"Impostazione con restrizioni\": Impostazioni › App › Argus › ⋮ › Consenti impostazioni con restrizioni, poi riprova.</string>
     <string name="settings_location_title">Posizione in background</string>
     <string name="settings_location_granted">sempre — i geofence sono affidabili</string>
@@ -224,6 +290,21 @@
     <string name="settings_bt_title">Trigger Bluetooth</string>
     <string name="settings_bt_on">attivi — connessione e disconnessione dei dispositivi sono armabili</string>
     <string name="settings_bt_off">non attivi — consenti Dispositivi nelle vicinanze per armare le regole</string>
+    <string name="tel08_settings_send_sms_title">Invio SMS</string>
+    <string name="tel08_settings_send_sms_on">consentito — le regole possono inviare SMS (al massimo 10 l\'ora)</string>
+    <string name="tel08_settings_send_sms_off">non consentito — consentilo per armare le regole che inviano SMS</string>
+    <string name="tel08_settings_call_phone_title">Chiamate</string>
+    <string name="tel08_settings_call_phone_on">consentite — le regole possono fare chiamate (al massimo 3 l\'ora)</string>
+    <string name="tel08_settings_call_phone_off">non consentite — consentile per armare le regole che chiamano</string>
+    <string name="tel08_settings_screening_title">Filtro chiamate</string>
+    <string name="tel08_settings_screening_on">attivo — le regole possono rifiutare o silenziare le chiamate prima dello squillo</string>
+    <string name="tel08_settings_screening_off">non attivo — rendi Argus l\'app di filtro chiamate per armare queste regole</string>
+    <string name="tel08_settings_contacts_title">Contatti</string>
+    <string name="tel08_settings_contacts_on">consentiti — il filtro chiamate può risparmiare i tuoi contatti</string>
+    <string name="tel08_settings_contacts_off">non consentiti — servono solo per filtrare chi non è nei tuoi contatti</string>
+    <string name="settings_calendar_title">Regole del calendario</string>
+    <string name="settings_calendar_on">attive — le regole possono leggere gli eventi del calendario</string>
+    <string name="settings_calendar_off">non attive — consenti Calendario per armare le regole che usano i tuoi eventi</string>
     <string name="settings_sentinel_title">Sentinella connettività</string>
     <string name="settings_sentinel_active">attiva — monitora Wi-Fi e alimentazione per le regole armate</string>
     <string name="settings_clibridge_title">CliBridge · Hermes</string>
@@ -244,6 +325,41 @@
     <string name="settings_privacy_missing">Consenso non accettato</string>
     <string name="settings_whitelist_note">Solo questi contatti possono ricevere risposte automatiche. Memorizzati per conversationId, non per nome — spoofabile.</string>
     <string name="settings_add_contact">Aggiungi contatto</string>
+    <!-- 0.8 · Sistema › Segreti -->
+    <string name="settings_secrets_title">Segreti</string>
+    <string name="settings_secrets_subtitle">Token e password che le regole usano per nome</string>
+    <string name="secrets_title">Segreti</string>
+    <string name="secrets_intro">Token e password che le regole usano per nome. Restano cifrati su questo telefono: non vanno all\'AI, non entrano in backup e condivisioni, e dopo il salvataggio non si possono più leggere.</string>
+    <string name="secrets_saved_header">Salvati · %1$d</string>
+    <string name="secrets_empty">Nessun segreto salvato.</string>
+    <string name="secrets_used_by_none">Nessuna regola lo usa</string>
+    <string name="secrets_used_by_one">Usato da 1 regola</string>
+    <string name="secrets_used_by_many">Usato da %1$d regole</string>
+    <string name="secrets_last_never">mai usato finora</string>
+    <string name="secrets_last_today">ultimo uso oggi %1$s</string>
+    <string name="secrets_last_yesterday">ultimo uso ieri %1$s</string>
+    <string name="secrets_last_on">ultimo uso %1$s</string>
+    <string name="secrets_more_cd">Altre azioni per %1$s</string>
+    <string name="secrets_replace">Sostituisci valore</string>
+    <string name="secrets_delete">Elimina</string>
+    <string name="secrets_add">Aggiungi segreto</string>
+    <string name="secrets_how_header">Come si usa</string>
+    <string name="secrets_how_body">In chat scrivi il nome: «manda la richiesta a Home Assistant con il segreto ha_token».</string>
+    <string name="secrets_how_review">In approvazione vedi dove va, mai il valore:</string>
+    <string name="secrets_how_example_secret">segreto ha_token</string>
+    <string name="secrets_delete_note">Se elimini un segreto, le regole che lo usano si fermano e passano a «Da rivedere».</string>
+    <string name="secrets_add_title">Nuovo segreto</string>
+    <string name="secrets_replace_title">Sostituisci %1$s</string>
+    <string name="secrets_name_label">Nome</string>
+    <string name="secrets_name_hint">Lettere minuscole, cifre e _, inizia con una lettera (al massimo 32)</string>
+    <string name="secrets_name_invalid">Nome non valido: lettere minuscole, cifre e _, inizia con una lettera, al massimo 32 caratteri</string>
+    <string name="secrets_name_taken">Esiste già un segreto con questo nome: usa «Sostituisci valore»</string>
+    <string name="secrets_value_label">Valore</string>
+    <string name="secrets_value_hint">Dopo il salvataggio non si potrà più leggere.</string>
+    <string name="secrets_value_invalid">Da 1 a 4096 caratteri, su una riga</string>
+    <string name="secrets_save">Salva</string>
+    <string name="secrets_delete_title">Eliminare %1$s?</string>
+    <string name="secrets_delete_body">Le regole che lo usano si fermano e passano a «Da rivedere». Il valore non si può recuperare.</string>
     <string name="settings_remove_contact_cd">Rimuovi %1$s</string>
     <string name="settings_budget_soft">Budget quasi esaurito</string>
     <string name="settings_budget_calls_hour">Chiamate · ultima ora</string>
@@ -256,6 +372,7 @@
     <string name="settings_budget_provider_finish">ultimo motivo di termine · %1$s</string>
     <string name="settings_budget_provider_cost">costo mese %1$s</string>
     <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
+    <string name="settings_budget_default_note">Limite predefinito: al massimo %1$d chiamate AI al giorno, così una regola finita in un ciclo non fa salire i costi. Puoi cambiarlo o toglierlo con Modifica limiti.</string>
     <string name="settings_budget_edit_limits">Modifica limiti</string>
     <string name="settings_rerun">Ripeti configurazione</string>
     <string name="settings_shizuku_unsupported">Shizuku troppo vecchio: aggiornalo</string>
@@ -297,13 +414,14 @@
     <string name="onboarding_shizuku_recommended_sub">Funzionano anche senza, ma solo con Argus aperto in primo piano.</string>
     <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
     <string name="onboarding_brain_unverified">Connessione non ancora verificata: potrai controllarla da Sistema.</string>
+    <string name="onboarding_brain_budget_default">Per tenere sotto controllo i costi, Argus fa al massimo %1$d chiamate AI al giorno. Puoi cambiare o togliere questo limite in Sistema.</string>
     <string name="onboarding_battery_consequence">Senza l\'esclusione, Android o la gestione energetica del produttore può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
 
     <!-- Backup delle regole (0.4.0, F1) -->
     <string name="backup_section">BACKUP DELLE REGOLE</string>
     <string name="backup_body">Salva le regole in un file o portale su un altro telefono. Il backup di Android resta disattivato, per la tua privacy.</string>
-    <string name="backup_strip_label">Togli posizioni e contatti (per condividere)</string>
-    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti e numeri di telefono vengono tolti, e i geofence chiedono la posizione corrente quando li armi. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
+    <string name="backup_strip_label">Togli i dati personali (per condividere)</string>
+    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti, numeri di telefono, nomi di reti e dispositivi, titoli delle notifiche e valori segreti vengono tolti; i geofence chiedono la posizione corrente quando li armi. Chi importa la regola li completa prima di armarla. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
     <string name="backup_export">Esporta</string>
     <string name="backup_import">Importa</string>
     <string name="backup_import_hint">Le regole importate arrivano come bozze da approvare: nessuna si arma da sola.</string>
@@ -312,6 +430,102 @@
     <string name="backup_working_import">Importazione in corso…</string>
     <string name="backup_open_rules">Vedi le regole</string>
     <string name="backup_dismiss">Chiudi</string>
+    <!-- 0.7.2 · Condividi una regola (prefisso share_) -->
+    <string name="share_action_cd">Condividi regola</string>
+    <string name="share_title">Condividi regola</string>
+    <string name="share_subtitle">Chi la riceve la importa come bozza e la approva sul suo telefono.</string>
+    <string name="share_strip_label">Togli i dati personali</string>
+    <string name="share_strip_hint">Numeri, chat, luoghi, nomi di reti e segreti restano fuori. Chi importa li completa prima di armare.</string>
+    <string name="share_strip_off_warning">Il testo contiene le tue chat, i numeri, i luoghi e i valori segreti: condividilo solo con persone di cui ti fidi.</string>
+    <string name="share_qr_caption">Inquadra con la fotocamera</string>
+    <string name="share_qr_cd">Codice QR della regola</string>
+    <string name="share_qr_too_long">Questa regola è troppo lunga per un codice QR: condividila come testo o come file.</string>
+    <string name="share_as_text">Condividi come testo</string>
+    <string name="share_save_file">Salva file</string>
+    <string name="share_copy">Copia</string>
+    <!-- 0.7.2 · Ricevere una regola: import da testo o da un'altra app (prefisso import_) -->
+    <string name="import_text_action">Importa da testo</string>
+    <string name="import_text_title">Importa da testo</string>
+    <string name="import_text_hint">Incolla il testo di una regola condivisa o di un backup delle regole.</string>
+    <string name="import_text_label">Testo della regola</string>
+    <string name="import_text_empty">Qui compaiono le regole che contiene, prima di importarle.</string>
+    <string name="import_checking">Controllo in corso…</string>
+    <string name="import_confirm">Importa</string>
+    <string name="import_cancel">Annulla</string>
+    <string name="import_pick_file">Scegli un file</string>
+    <string name="import_unnamed">(senza nome)</string>
+    <string name="import_received_title">Importa in Argus</string>
+    <string name="import_received_body">Un\'altra app ha mandato questo ad Argus. Non cambia nulla finché non confermi: ogni regola diventa una bozza che leggi e approvi da sola.</string>
+    <string name="import_received_loading">Lettura in corso…</string>
+    <string name="import_received_working">Importazione in corso…</string>
+    <string name="import_received_open">Apri Argus</string>
+    <string name="import_received_close">Chiudi</string>
+    <!-- 0.7.2 · Galleria dei modelli (prefisso tpl_) -->
+    <string name="tpl_open">Modelli</string>
+    <string name="tpl_title">Modelli</string>
+    <string name="tpl_intro">Regole pronte da adattare. Un modello entra come bozza: la leggi e la approvi come tutte le altre.</string>
+    <string name="tpl_filter_cd">Categoria dei modelli</string>
+    <string name="tpl_filter_all">Tutti</string>
+    <string name="tpl_filter_home">Casa</string>
+    <string name="tpl_filter_work">Lavoro</string>
+    <string name="tpl_filter_battery">Batteria</string>
+    <string name="tpl_filter_messages">Messaggi</string>
+    <string name="tpl_use">Usa questo modello</string>
+    <string name="tpl_import_row">Importa una regola da file o da testo</string>
+    <string name="tpl_empty">Nessun modello disponibile.</string>
+    <string name="tpl_need_privileged">Serve Shizuku o root</string>
+    <string name="tpl_need_dnd">Chiede l\'accesso a Non disturbare</string>
+    <string name="tpl_need_write_settings">Chiede di modificare le impostazioni di sistema</string>
+    <string name="tpl_need_location">Chiede la tua posizione</string>
+    <string name="tpl_need_notification_access">Chiede l\'accesso alle notifiche</string>
+    <string name="tpl_need_notifications">Mostra notifiche</string>
+    <string name="tpl_need_sms">Chiede di ricevere gli SMS</string>
+    <string name="tpl_need_calls">Chiede l\'accesso alle chiamate</string>
+    <string name="tpl_need_bluetooth">Chiede l\'accesso al Bluetooth</string>
+    <string name="tpl_need_usage">Chiede l\'accesso ai dati di utilizzo</string>
+    <string name="tpl_need_accessibility">Usa il servizio di Accessibilità</string>
+    <string name="tpl_blank_chat">La chat la scegli tu</string>
+    <string name="tpl_blank_sender">Il mittente lo scegli tu</string>
+    <string name="tpl_blank_number">Il numero lo scegli tu</string>
+    <string name="tpl_blank_network">La rete la scegli tu</string>
+    <string name="tpl_blank_place">Il luogo lo scegli tu</string>
+    <string name="tpl_blank_secret">I valori segreti li aggiungi tu</string>
+    <string name="tpl_blank_current_location">Il luogo è dove la armi</string>
+    <!-- Import cifrato e backup automatico (0.7.2) -->
+    <string name="backup_import_encrypted_body">Questo backup è cifrato. Inserisci la passphrase con cui è stato fatto.</string>
+    <string name="backup_import_passphrase_field">Passphrase del backup</string>
+    <string name="backup_import_open">Apri</string>
+    <string name="backup_auto_title">Backup automatico</string>
+    <string name="backup_auto_body">Salva una copia cifrata delle regole in una cartella che scegli, per esempio quella che un\'app di sincronizzazione come Nextcloud carica. Parte di notte, senza di te.</string>
+    <string name="backup_auto_switch_on_cd">Attiva il backup automatico</string>
+    <string name="backup_auto_switch_off_cd">Disattiva il backup automatico</string>
+    <string name="backup_auto_needs_setup">Scegli una cartella e imposta una passphrase per attivarlo.</string>
+    <string name="backup_auto_folder_label">Cartella</string>
+    <string name="backup_auto_folder_none">Nessuna cartella scelta</string>
+    <string name="backup_auto_folder_choose">Scegli cartella</string>
+    <string name="backup_auto_folder_change">Cambia cartella</string>
+    <string name="backup_auto_frequency_label">Frequenza</string>
+    <string name="backup_auto_daily">Ogni giorno</string>
+    <string name="backup_auto_weekly">Ogni settimana</string>
+    <string name="backup_auto_passphrase_label">Passphrase</string>
+    <string name="backup_auto_passphrase_set">Impostata</string>
+    <string name="backup_auto_passphrase_missing">Non impostata</string>
+    <string name="backup_auto_passphrase_add">Imposta passphrase</string>
+    <string name="backup_auto_passphrase_change">Cambia passphrase</string>
+    <string name="backup_auto_passphrase_working">Preparazione della chiave…</string>
+    <string name="backup_auto_never">Nessun backup ancora.</string>
+    <string name="backup_auto_retention">Argus tiene gli ultimi 7 backup che ha scritto in quella cartella e non tocca gli altri file.</string>
+    <string name="backup_auto_run_now">Esegui backup ora</string>
+    <string name="backup_auto_running">Backup in corso…</string>
+    <string name="backup_passphrase_sheet_title">Passphrase del backup</string>
+    <string name="backup_passphrase_sheet_body">I backup sono cifrati con questa passphrase e ti serve per ripristinarli su un nuovo telefono. Argus non la conserva. Se la dimentichi nessuno può recuperarla e i backup non si possono più aprire.</string>
+    <string name="backup_passphrase_change_note">I backup già fatti restano leggibili con la passphrase con cui sono stati fatti.</string>
+    <string name="backup_passphrase_field">Nuova passphrase</string>
+    <string name="backup_passphrase_confirm_field">Ripeti la passphrase</string>
+    <string name="backup_passphrase_too_short">Almeno 8 caratteri.</string>
+    <string name="backup_passphrase_mismatch">Le due passphrase non coincidono.</string>
+    <string name="backup_passphrase_save">Salva</string>
+    <string name="backup_passphrase_cancel">Annulla</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Svuotare la conversazione?</string>
@@ -364,6 +578,10 @@
     <string name="pause_setting_title">Pausa automazioni</string>
     <string name="pause_setting_on">Nessuna regola scatta, comprese quelle manuali. Le sveglie restano registrate; quello che viene saltato non si recupera alla ripresa.</string>
     <string name="pause_setting_off">Le regole scattano normalmente.</string>
+    <!-- 0.7.2: avvisi di salute delle regole. -->
+    <string name="health_alerts_setting_title">Avvisami quando una regola smette di funzionare</string>
+    <string name="health_alerts_setting_on">Una notifica quando una regola fallisce 3 volte di fila o perde qualcosa che le serve (Shizuku, accesso alle notifiche, Accessibilità, sveglie esatte, posizione). Mostra solo nomi di regole e conteggi.</string>
+    <string name="health_alerts_setting_off">Nessun avviso: una regola che smette di funzionare si vede solo nel Log.</string>
 
     <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
     <string name="priv50_section">Privilegi</string>
@@ -466,6 +684,30 @@
     <string name="rda_lc_row_open">Apri la regola</string>
     <string name="rda_lc_next_fire_cd">Prossimo scatto: %1$s</string>
     <string name="rda_lc_last_fire_cd">Ultimo scatto: %1$s</string>
+    <!-- 0.7.2: ricerca, etichette e pausa per gruppo nella lista Automazioni. -->
+    <string name="lbl_search_placeholder">Cerca per nome, app o azione</string>
+    <string name="lbl_search_clear">Cancella la ricerca</string>
+    <string name="lbl_search_empty_title">Nessuna regola per «%1$s»</string>
+    <string name="lbl_search_empty_body">Prova con un\'altra parola o con il nome di un\'app.</string>
+    <string name="lbl_filter_group">Filtra per etichetta</string>
+    <string name="lbl_chip_all">Tutte · %1$d</string>
+    <string name="lbl_chip_all_cd">Tutte le regole, %1$d</string>
+    <string name="lbl_chip_count">%1$s · %2$d</string>
+    <string name="lbl_chip_cd">Etichetta %1$s, %2$d regole</string>
+    <string name="lbl_chip_paused_cd">Etichetta %1$s, %2$d regole, gruppo in pausa</string>
+    <string name="lbl_group_title">Etichetta «%1$s»</string>
+    <string name="lbl_group_active_one">1 attiva</string>
+    <string name="lbl_group_active_many">%1$d attive</string>
+    <string name="lbl_group_waiting">%1$d da approvare</string>
+    <string name="lbl_group_none_active">Nessuna regola attiva</string>
+    <string name="lbl_group_paused_summary">In pausa · %1$s</string>
+    <string name="lbl_group_paused_state">Gruppo in pausa: le sue regole non scattano</string>
+    <string name="lbl_group_pause">Pausa gruppo</string>
+    <string name="lbl_group_resume">Riprendi gruppo</string>
+    <string name="lbl_row_paused">In pausa</string>
+    <string name="lbl_row_paused_cd">In pausa per il suo gruppo: non scatta</string>
+    <string name="lbl_label_paused_cd">gruppo in pausa</string>
+    <string name="lbl_list_note">Le etichette si scelgono nel dettaglio della regola. Non cambiano cosa fa la regola e non richiedono una nuova approvazione.</string>
     <string name="rda_lc_wait_cd">Argus sta pensando, %1$d secondi</string>
     <string name="rda_lc_wait_axis_start">0 s</string>
     <string name="rda_lc_wait_axis_band">%1$d-%2$d s</string>
@@ -476,6 +718,8 @@
     <!-- 0.7.0 · Approvazione e dettaglio (redesign A, blocco rda_ap_). -->
     <string name="rda_ap_risks_title">Prima di armare</string>
     <string name="rda_ap_warnings_title">Avvisi</string>
+    <string name="rda_ap_imported">Regola importata</string>
+    <string name="rda_ap_imported_note">Viene da un file importato, non dalla chat: controlla ogni passo prima di armarla.</string>
     <string name="rda_ap_errors_one">1 errore</string>
     <string name="rda_ap_errors_many">%1$d errori</string>
     <string name="rda_ap_warnings_one">1 avviso</string>
@@ -494,6 +738,15 @@
     <string name="rda_ap_picker_current">in uso</string>
     <string name="rda_ap_picker_pick_cd">Usa %1$s</string>
     <string name="rda_ap_run_now_fallback">Esegui ora non è ancora disponibile.</string>
+    <!-- 0.7.2 · Cosa cambia quando approvi una modifica (prefisso diff_) -->
+    <string name="diff_title">Cosa cambia</string>
+    <string name="diff_subtitle">Rispetto alla versione approvata. La regola intera resta qui sotto.</string>
+    <string name="diff_nothing">Non cambia nulla di ciò che viene eseguito: cambiano solo il nome o la descrizione.</string>
+    <string name="diff_added">Aggiunto</string>
+    <string name="diff_removed">Tolto</string>
+    <string name="diff_changed">Cambiato</string>
+    <string name="diff_before">Prima</string>
+    <string name="diff_now">Ora</string>
     <!-- Issue #19: endpoint http:// sulla rete locale -->
     <string name="provider_unencrypted_lan_warning">Connessione non cifrata: la chiave e le tue richieste viaggiano in chiaro. Usala solo su una rete di cui ti fidi.</string>
     <!-- Issue #20: tempo massimo di risposta -->
@@ -504,4 +757,39 @@
     <!-- Issue #21: copia di un messaggio della chat -->
     <string name="chat_message_copy_action">Copia messaggio</string>
     <string name="chat_message_copied">Messaggio copiato</string>
+    <!-- 0.8: prova a secco -->
+    <string name="dry_run_title">Prova a secco</string>
+    <string name="dry_run_action">Prova a secco</string>
+    <string name="dry_run_action_hint">Mostra passo per passo cosa farebbe un\'esecuzione, senza eseguire nulla.</string>
+    <string name="dry_run_banner">Simulazione: non viene eseguito nulla. Le condizioni si leggono dal telefono in questo momento.</string>
+    <string name="dry_run_event_header">Evento di prova</string>
+    <string name="dry_run_field_sender">Mittente</string>
+    <string name="dry_run_field_title">Titolo</string>
+    <string name="dry_run_field_text">Testo del messaggio</string>
+    <string name="dry_run_field_number">Numero</string>
+    <string name="dry_run_field_name">Rete o dispositivo</string>
+    <string name="dry_run_field_mode">Nuova modalità</string>
+    <string name="dry_run_no_fields">Questo trigger non porta dati da scrivere: la prova usa il suo evento così com\'è.</string>
+    <string name="dry_run_verified_scan">Scansione verificata</string>
+    <string name="dry_run_phase_label">Cosa simulare</string>
+    <string name="dry_run_phase_start">L\'inizio</string>
+    <string name="dry_run_phase_end">La fine</string>
+    <string name="dry_run_run_again">Prova di nuovo</string>
+    <string name="dry_run_steps_header">Cosa succederebbe</string>
+    <string name="dry_run_shell_label">comando shell, integrale</string>
+    <string name="dry_run_answer_label">Risposta simulata</string>
+    <string name="dry_run_footer">Nel Log questa prova non compare: non conta come esecuzione e non consuma il cooldown.</string>
+    <string name="dry_run_not_simulated">Non simulati: i tetti orari di SMS e chiamate, il budget dell\'AI, chi riceverebbe un Intent implicito.</string>
+    <string name="dry_run_missing">Questa regola non è più disponibile.</string>
+    <string name="dry_run_tone_ok">Succederebbe</string>
+    <string name="dry_run_tone_ai">Passo con l\'AI</string>
+    <string name="dry_run_tone_ask">Aspetta te</string>
+    <string name="dry_run_tone_blocked">Bloccato</string>
+    <string name="dry_run_tone_stopped">Si ferma</string>
+    <string name="dry_run_tone_skipped">Non succede</string>
+    <string name="dry_run_tone_info">Passo del programma</string>
+    <!-- 0.8: regole attive prima del primo sblocco (facoltative per regola, dettaglio). -->
+    <string name="before_unlock_title">Attiva anche prima dello sblocco</string>
+    <string name="before_unlock_body">Dopo un riavvio questa regola scatta anche prima che sblocchi il telefono per la prima volta.</string>
+    <string name="before_unlock_weaker">Per permetterlo, una sua copia è conservata con una protezione più debole: si può leggere prima del primo sblocco.</string>
 </resources>

@@ -22,11 +22,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAltOff
@@ -34,6 +36,8 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SyncProblem
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -46,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,8 +90,15 @@ import dev.argus.ui.components.HealthBanner
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.components.ModelDescriptionNote
+import dev.argus.ui.components.AddLabelSheet
+import dev.argus.ui.components.ArgusIconButton
+import dev.argus.ui.components.BeforeUnlockCard
+import dev.argus.ui.components.RuleChangesCard
+import dev.argus.ui.components.RuleLabelsSection
+import dev.argus.ui.components.RuleShareSheet
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusBadgeChip
+import dev.argus.ui.components.StatusChip
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AppInfoUi
 import dev.argus.ui.model.AppRef
@@ -100,6 +112,8 @@ import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
 import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleDiagnosisUi
+import dev.argus.ui.model.RuleLabelUi
+import dev.argus.ui.model.RuleLabelsUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.RuleStatsWindow
@@ -166,11 +180,13 @@ fun AutomationDetailScreen(
     // «Cambia app»: lo slot e il package che si stanno cambiando (null = foglio chiuso).
     var pickerSlot by rememberSaveable { mutableStateOf<Int?>(null) }
     var pickerPackage by rememberSaveable { mutableStateOf<String?>(null) }
+    // 0.7.2: foglio «Aggiungi un'etichetta».
+    var showLabelSheet by rememberSaveable { mutableStateOf(false) }
     val changeApp: ((AppRef) -> Unit)? = if (canChangeApp(state)) {
         { ref ->
+            // L'elenco lo carica il foglio quando compare (vedi sotto), non il tocco.
             pickerSlot = ref.slot
             pickerPackage = ref.packageName
-            callbacks.onLoadAppChoices()
         }
     } else {
         null
@@ -182,6 +198,17 @@ fun AutomationDetailScreen(
                 else stringResource(R.string.detail_header_detail),
                 onBack = callbacks::onBack,
                 backContentDescription = stringResource(R.string.action_back),
+                actions = {
+                    // 0.7.2: solo una regola salvata e leggibile si condivide; mai una bozza da approvare.
+                    if (state.canShare) {
+                        ArgusIconButton(
+                            Icons.Rounded.Share,
+                            stringResource(R.string.share_action_cd),
+                            callbacks::onShare,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                },
             )
 
             Column(
@@ -203,6 +230,9 @@ fun AutomationDetailScreen(
                     else stringResource(R.string.rda_ap_warnings_title),
                     warnings = state.warnings,
                 )
+
+                // 0.7.2: la bozza sostituisce una regola approvata: cosa cambia, sopra la regola intera.
+                state.changes?.let { RuleChangesCard(it) }
 
                 // Invariante 4: la verità visiva è SEMPRE RuleRender, resa dai tipi.
                 ApprovalRuleTimeline(
@@ -231,6 +261,20 @@ fun AutomationDetailScreen(
                 // Invariante 4: la prosa dell'LLM è un commento subordinato, dopo la regola.
                 state.rationale?.let { ModelDescriptionNote(it) }
 
+                // 0.7.2: etichette (solo regole salvate). Organizzazione: non toccano la regola né la sua approvazione.
+                state.labels?.let { labels ->
+                    RuleLabelsSection(
+                        labels = labels,
+                        onAdd = { showLabelSheet = true },
+                        onRemove = callbacks::onRemoveLabel,
+                    )
+                }
+
+                // 0.8: «Attiva anche prima dello sblocco», only for a saved rule that qualifies. Organisation too.
+                state.beforeUnlock?.let { option ->
+                    BeforeUnlockCard(enabled = option.enabled, onEnabledChange = callbacks::onSetBeforeUnlock)
+                }
+
                 if (state.recentRuns.isNotEmpty()) {
                     RecentRunsSection(state.recentRuns, callbacks::onOpenFullLog)
                 }
@@ -251,6 +295,11 @@ fun AutomationDetailScreen(
                     RunNowCard(state, onRunNow = { if (state.canRunNow) confirmRunNow = true })
                 }
 
+                // 0.8: «Prova a secco», per una bozza come per una regola salvata. Non esegue nulla.
+                if (state.dryRunAvailable) {
+                    DryRunCard(onDryRun = callbacks::onDryRun)
+                }
+
                 Spacer(Modifier.height(ArgusSpacing.Unit))
             }
 
@@ -263,6 +312,9 @@ fun AutomationDetailScreen(
     }
     val slot = pickerSlot
     if (slot != null) {
+        // Lo slot sopravvive alla morte del processo (rememberSaveable), l'elenco no: il foglio lo carica
+        // ogni volta che compare, sia dopo un tocco su «Cambia app» sia quando si riapre da solo.
+        LaunchedEffect(slot) { callbacks.onLoadAppChoices() }
         ApprovalAppPickerSheet(
             choices = state.appChoices,
             currentPackage = pickerPackage,
@@ -272,6 +324,26 @@ fun AutomationDetailScreen(
                 callbacks.onChangeApp(slot, choice.packageName)
             },
             onDismiss = { pickerSlot = null },
+        )
+    }
+    state.share?.let { share ->
+        RuleShareSheet(
+            share = share,
+            onDismiss = callbacks::onDismissShare,
+            onShareAsText = callbacks::onShareAsText,
+            onSaveFile = callbacks::onSaveShareFile,
+            onCopy = callbacks::onCopyShare,
+        )
+    }
+    val ruleLabels = state.labels
+    if (showLabelSheet && ruleLabels != null) {
+        AddLabelSheet(
+            labels = ruleLabels,
+            onAdd = { label ->
+                showLabelSheet = false
+                callbacks.onAddLabel(label)
+            },
+            onDismiss = { showLabelSheet = false },
         )
     }
     if (confirmDelete) {
@@ -339,6 +411,22 @@ private fun TitleAndBadges(state: AutomationDetailState) {
                 GenerativeTag(size = ChipSize.Regular)
                 CloudTag(size = ChipSize.Regular)
             }
+            // S8: una bozza importata non nasce dalla chat dell'utente: si dice chiaro.
+            if (state.imported) {
+                StatusChip(
+                    ArgusTheme.semantic.pending,
+                    Icons.Rounded.FileDownload,
+                    stringResource(R.string.rda_ap_imported),
+                    size = ChipSize.Regular,
+                )
+            }
+        }
+        if (state.imported) {
+            Text(
+                stringResource(R.string.rda_ap_imported_note),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
@@ -459,6 +547,10 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Pair<Color, Color>> {
         AuditKind.RULE_ARMED, AuditKind.RULE_ENABLED -> Icons.Rounded.CheckCircle to (s.armed.bg to s.armed.fg)
         AuditKind.RULE_DISABLED, AuditKind.RULE_DELETED -> Icons.Rounded.Block to neutral
         AuditKind.RULE_NEEDS_REVIEW -> Icons.Rounded.SyncProblem to (s.needsReview.bg to s.needsReview.fg)
+        // 0.8: decisione del filtro chiamate.
+        AuditKind.CALL_SCREENED -> Icons.Rounded.CallEnd to neutral
+        // 0.8: the option «active before unlock» switched itself off.
+        AuditKind.BEFORE_UNLOCK_OFF -> Icons.Rounded.Block to neutral
         AuditKind.FIRED -> when (row.outcome) {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to (s.armed.bg to s.armed.fg)
             LogOutcome.PARTIAL -> Icons.Rounded.CheckCircle to (s.pending.bg to s.pending.fg)
@@ -709,6 +801,30 @@ private fun RunNowCard(state: AutomationDetailState, onRunNow: () -> Unit) {
             // Il motivo è testo visibile sotto il pulsante, mai un tooltip (regola 2 dei componenti).
             disabledReason = state.runNowBlockedReason ?: stringResource(R.string.rda_ap_run_now_fallback),
         )
+    }
+}
+
+/** 0.8: «Prova a secco» apre la simulazione di un'esecuzione: niente parte, niente va nel Log. */
+@Composable
+private fun DryRunCard(onDryRun: () -> Unit) {
+    ArgusCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(ArgusRadius.Lg),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = ArgusSpacing.Medium),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small)) {
+            ArgusButton(
+                text = stringResource(R.string.dry_run_action),
+                onClick = onDryRun,
+                style = ButtonStyle.Outlined,
+                icon = Icons.Rounded.Science,
+            )
+            Text(
+                stringResource(R.string.dry_run_action_hint),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 
@@ -1152,6 +1268,27 @@ private fun DetailPendingGenerativePreview() {
     ArgusTheme { AutomationDetailScreen(previewReplyDetail, NoopDetailCallbacks) }
 }
 
+/** 0.7.2: modifica di una regola armata, con la card «Cosa cambia» sopra la regola. */
+@DetailThemePreviews
+@Composable
+private fun DetailPendingEditPreview() {
+    ArgusTheme {
+        AutomationDetailScreen(
+            previewReplyDetail.copy(
+                changes = listOf(
+                    dev.argus.ui.presentation.RuleChangeRow(
+                        dev.argus.ui.presentation.RuleSection.ACTIONS,
+                        dev.argus.ui.presentation.RuleChangeKind.CHANGED,
+                        dev.argus.ui.presentation.RenderLine("Attiva Non disturbare (priorità)"),
+                        dev.argus.ui.presentation.RenderLine("Attiva Non disturbare (totale)"),
+                    ),
+                ),
+            ),
+            NoopDetailCallbacks,
+        )
+    }
+}
+
 @DetailThemePreviews
 @Composable
 private fun DetailPendingBlockedPreview() {
@@ -1174,7 +1311,17 @@ private fun DetailPendingAppsPreview() {
 @DetailThemePreviews
 @Composable
 private fun DetailArmedPreview() {
-    ArgusTheme { AutomationDetailScreen(previewArmedDetail, NoopDetailCallbacks) }
+    ArgusTheme {
+        AutomationDetailScreen(
+            previewArmedDetail.copy(
+                labels = RuleLabelsUi(
+                    labels = listOf(RuleLabelUi("Casa", paused = false), RuleLabelUi("Notte", paused = true)),
+                    existing = listOf("Casa", "Notte", "Lavoro"),
+                ),
+            ),
+            NoopDetailCallbacks,
+        )
+    }
 }
 
 @DetailThemePreviews
@@ -1197,6 +1344,7 @@ private fun DetailArmedStatsPreview() {
             previewArmedDetail.copy(
                 banner = EngineBanner.NONE,
                 canRunNow = true,
+                dryRunAvailable = true,
                 runNowBlockedReason = null,
                 stats = RuleStatsUi(
                     last7Days = RuleStatsWindow(fires = 3, succeeded = 2, failed = 1),

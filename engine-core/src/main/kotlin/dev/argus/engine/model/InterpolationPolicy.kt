@@ -125,6 +125,44 @@ object InterpolationPolicy {
             (step as? UiStep.Type)?.let { TemplateField("steps.$index.text", it.text, FieldClass.SINK) }
         }
 
+        // --- 0.8 scaffold ---
+        // Domanda all'utente: il testo è un'uscita locale; scelte, captureAs e default sono letterali.
+        is Action.Ask -> listOf(TemplateField("prompt", action.prompt, FieldClass.SINK))
+
+        // Valore conservato: dato locale; la chiave è letterale.
+        is Action.SetStored -> listOfNotNull(action.value?.let { TemplateField("value", it, FieldClass.SINK) })
+
+        // Risposta a una notifica e SMS: il testo esce verso un'altra persona, come whatsapp_reply; un
+        // valore con provenienza di credenziale non può uscire.
+        is Action.NotificationReply ->
+            listOf(TemplateField("text", action.text, FieldClass.SINK, remoteEgress = true))
+
+        // Il destinatario può essere SOLO `${'$'}{var}` legato al numero di chi ha chiamato o scritto (vincolato
+        // al mittente del trigger, come la reply: validator e interpolatore lo verificano e ricontrollano la
+        // forma del numero risolto), per questo non è un campo di autorità.
+        is Action.SendSms -> listOf(
+            TemplateField("number", action.number, FieldClass.SINK),
+            TemplateField("text", action.text, FieldClass.SINK, remoteEgress = true),
+        )
+
+        // Intent: solo il valore degli extra STRING è un template, ed è autorità (routing verso un'altra app).
+        is Action.SendIntent -> action.extras.mapIndexedNotNull { index, extra ->
+            if (extra.type == IntentExtraType.STRING) {
+                TemplateField("extras.$index.value", extra.value, FieldClass.AUTHORITY)
+            } else {
+                null
+            }
+        }
+
+        // Letterali: modalità, pulsante della notifica, numero, decisione sulla chiamata.
+        is Action.SetUserMode -> emptyList()
+
+        is Action.NotificationAction -> emptyList()
+
+        is Action.CallNumber -> emptyList()
+
+        is Action.ScreenCall -> emptyList()
+
         // --- AUTHORITY: template fingerprintati; TAINTED dipende da TaintPolicy ---
         is Action.RunShell -> listOf(
             TemplateField("cmd", action.cmd, FieldClass.AUTHORITY, shellQuoted = true),

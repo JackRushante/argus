@@ -112,6 +112,22 @@ class RootPrivilegedShellTest {
         )
     }
 
+    private fun setsidAvailable() {
+        shellAvailable()
+        assumeTrue(
+            System.getenv("PATH").orEmpty().split(File.pathSeparator).any { File(it, "setsid").exists() },
+            "needs setsid in PATH",
+        )
+    }
+
+    /** Vivo e non zombie: un processo ucciso ma non ancora raccolto non conta. */
+    private fun processAlive(pid: Long): Boolean {
+        val stat = File("/proc/$pid/stat")
+        if (!stat.exists()) return false
+        val state = runCatching { stat.readText().substringAfterLast(')').trim().firstOrNull() }.getOrNull()
+        return state != null && state != 'Z' && state != 'X'
+    }
+
     private fun shell(
         preference: RootPreference,
         launcher: RootLauncher,
@@ -315,6 +331,50 @@ class RootPrivilegedShellTest {
         // La sessione dopo un timeout si rifà: nessun residuo del comando scaduto nell'output successivo.
         assertEquals("next\n", shell.run(listOf("echo", "next")).stdoutText)
         assertEquals(2, launcher.sessions.size)
+    }
+
+    @Test
+    fun `a timeout kills the whole process group of the command, not only its first process`() = runBlocking {
+        setsidAvailable()
+        val shell = active(MemoryRootPreference(true), TestLauncher())
+        val pidFile = File.createTempFile("argus-root-child", ".pid")
+        try {
+            // Il comando lancia un figlio e lo aspetta: allo scadere deve morire anche il figlio.
+            val result = shell.run(
+                listOf("sh", "-c", "sleep 30 & echo \$! > \"\$1\"; wait", "argus-test", pidFile.path),
+                timeoutMillis = 300,
+            )
+            assertTrue(result.timedOut)
+            val child = pidFile.readText().trim().toLong()
+            withTimeout(5_000) { while (processAlive(child)) kotlinx.coroutines.delay(50) }
+            assertFalse(processAlive(child))
+        } finally {
+            pidFile.delete()
+        }
+    }
+
+    @Test
+    fun `the watchdog does not shorten a command that ends in time and keeps its exit code`() = runBlocking {
+        setsidAvailable()
+        val shell = active(MemoryRootPreference(true), TestLauncher())
+        val result = shell.run(listOf("sh", "-c", "sleep 0.2; echo done; exit 4"), timeoutMillis = 5_000)
+        assertFalse(result.timedOut)
+        assertEquals(4, result.exitCode)
+        assertEquals("done\n", result.stdoutText)
+        assertEquals("", result.stderrText)
+    }
+
+    @Test
+    fun `output left behind by a background process never lands in the next command`() = runBlocking {
+        setsidAvailable()
+        val shell = active(MemoryRootPreference(true), TestLauncher())
+        // Un processo che sfugge al gruppo del comando e scrive dopo che il comando è finito.
+        val first = shell.run(listOf("sh", "-c", "setsid sh -c 'sleep 0.3; echo leaked; echo leaked >&2' &"))
+        assertEquals(0, first.exitCode)
+        kotlinx.coroutines.delay(1_000)
+        val next = shell.run(listOf("echo", "next"))
+        assertEquals("next\n", next.stdoutText)
+        assertEquals("", next.stderrText)
     }
 
     @Test

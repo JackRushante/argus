@@ -175,6 +175,17 @@ class DraftValidatorActions041Test {
     }
 
     @Test
+    fun `a header value outside plain ascii is reported at approval with its own code`() {
+        fun headerErrors(headers: Map<String, String>) = errors(v.validate(draft(http(headers = headers)), emptySet()))
+        listOf("Caffè", "“quoted”", "Bearer abc€").forEach { value ->
+            val found = headerErrors(mapOf("X-Value" to value))
+            assertTrue("http_header_not_ascii" in found, value)
+            assertFalse("http_header_invalid" in found, value)
+        }
+        assertEquals(emptyList(), headerErrors(mapOf("X-Value" to "plain ascii\twith tab")))
+    }
+
+    @Test
     fun `content type is validated and may not contradict the header`() {
         assertTrue(
             "http_content_type_invalid" in

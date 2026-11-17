@@ -11,7 +11,7 @@
     <string name="system_setting_unavailable">System setting unavailable.</string>
     <string name="permission_enable_in_app_settings">Enable the permission from the app settings.</string>
     <string name="whitelist_add_title">Add to whitelist</string>
-    <string name="whitelist_empty">No 1:1 conversations observed yet. Receive a WhatsApp message from the contact (with notification access enabled) and try again, or use manual entry.</string>
+    <string name="whitelist_empty">No 1:1 conversations observed yet. Receive a message from the contact on WhatsApp, Telegram, Signal or Google Messages (with notification access enabled) and try again, or use manual entry.</string>
     <string name="whitelist_recent">Recently observed 1:1 conversations:</string>
     <string name="manual_entry">Manual entry</string>
     <string name="close">Close</string>
@@ -24,6 +24,10 @@
     <string name="cancel">Cancel</string>
     <string name="add">Add</string>
     <string name="backup_picker_unavailable">No file picker is available on this phone.</string>
+    <string name="share_copied">Rule copied</string>
+    <string name="share_clip_label">Argus rule</string>
+    <string name="import_activity_label">Import into Argus</string>
+    <string name="dictation_unavailable">No speech recognizer is available on this phone.</string>
     <!-- 0.4.1 (manuale): avvio manuale (F8) e Pausa automazioni (F21). -->
     <string name="manual_tile_label">Argus: run rule</string>
     <string name="manual_tile_none">Choose a rule in the app</string>
@@ -39,4 +43,11 @@
     <string name="pause_tile_label">Pause automations</string>
     <string name="pause_tile_on">Paused</string>
     <string name="pause_tile_off">Active</string>
+    <!-- 0.8: user modes on the quick settings tile and the widget -->
+    <string name="mode_tile_label">Argus: mode</string>
+    <string name="mode_tile_none">No mode</string>
+    <string name="mode_tile_empty">Add modes in Argus</string>
+    <string name="mode_widget_active">✓ %1$s</string>
+    <string name="mode_toast_switched">Mode: %1$s</string>
+    <string name="mode_toast_unavailable">This mode is no longer available.</string>
 </resources>

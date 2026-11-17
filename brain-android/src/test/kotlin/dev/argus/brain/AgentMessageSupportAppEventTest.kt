@@ -31,8 +31,10 @@ class AgentMessageSupportAppEventTest {
 
     @Test
     fun `the trigger list rule names it as usable only when listed`() {
-        assertTrue("\"app_event\" (an app opened or closed) is usable only if listed" in prompt)
-        // Le frasi dei trigger precedenti restano com'erano.
-        assertTrue("\"screen\", \"battery\", \"audio_output\", \"mode_changed\" and \"media\" are usable only if listed" in prompt)
+        val flat = prompt.replace(Regex("\\s+"), " ")
+        val rule = flat.substring(flat.indexOf("10. If manifest.available_triggers"), flat.indexOf(" 11. run_shell"))
+        assertTrue("use ONLY the listed triggers" in rule, rule)
+        assertTrue("\"screen\", \"battery\", \"audio_output\", \"mode_changed\" and \"media\", \"app_event\"" in rule, rule)
+        assertTrue("must NOT be compiled" in rule, rule)
     }
 }

@@ -2,6 +2,7 @@ package dev.argus.data.backup
 
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.RuleLabels
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -18,7 +19,8 @@ import kotlinx.serialization.json.put
 /** Esito della lettura del file: o un rifiuto dell'intero file, o una voce per ogni regola. */
 sealed interface DecodedBackup {
     data class Rejected(val failure: BackupFailure) : DecodedBackup
-    data class Entries(val entries: List<DecodedEntry>) : DecodedBackup
+    /** [state] (0.8): modalità e valori conservati del file, se ne ha (vedi [BackupState]). */
+    data class Entries(val entries: List<DecodedEntry>, val state: BackupState = BackupState()) : DecodedBackup
 }
 
 sealed interface DecodedEntry {
@@ -36,8 +38,19 @@ object RulesBackupCodec {
     /** Come [ArgusJson] ma senza tollerare chiavi sconosciute. */
     private val strictJson = Json(from = ArgusJson) { ignoreUnknownKeys = false }
     private val prettyJson = Json { prettyPrint = true }
+    private val compactJson = Json { prettyPrint = false }
 
-    fun encode(rules: List<BackupRule>, exportedAt: String, appVersion: String): String {
+    /**
+     * [pretty] = false (0.7.2) scrive lo stesso documento senza spazi né a capo: è la forma del codice QR
+     * di una regola condivisa, che ogni import legge come il file indentato.
+     */
+    fun encode(
+        rules: List<BackupRule>,
+        exportedAt: String,
+        appVersion: String,
+        pretty: Boolean = true,
+        state: BackupState = BackupState(),
+    ): String {
         val root = buildJsonObject {
             put("format", RulesBackupFormat.FORMAT)
             put("version", RulesBackupFormat.VERSION)
@@ -56,8 +69,50 @@ object RulesBackupCodec {
                     }
                 },
             )
+            // 0.7.2: etichette fuori dalle voci (vedi RulesBackupFormat): chiave omessa se nessuna regola ne ha.
+            val labelled = rules.withIndex().mapNotNull { (index, rule) ->
+                RuleLabels.sanitize(rule.labels).takeIf { it.isNotEmpty() }?.let { index to it }
+            }
+            if (labelled.isNotEmpty()) {
+                put(
+                    LABELS_KEY,
+                    buildJsonArray {
+                        labelled.forEach { (index, names) ->
+                            add(
+                                buildJsonObject {
+                                    put("rule", index)
+                                    put("names", buildJsonArray { names.forEach { add(JsonPrimitive(it)) } })
+                                },
+                            )
+                        }
+                    },
+                )
+            }
+            // 0.8: modalità e valori conservati, chiavi omesse se vuote (vedi BackupState).
+            BackupStateCodec.encodeInto(this, state)
         }
-        return prettyJson.encodeToString(JsonElement.serializer(), root)
+        return (if (pretty) prettyJson else compactJson).encodeToString(JsonElement.serializer(), root)
+    }
+
+    /**
+     * Etichette per indice di regola. Lettura tollerante: le etichette sono organizzazione, quindi una sezione
+     * assente o malformata dà nessuna etichetta e non scarta mai una regola. Ogni elenco passa da
+     * [RuleLabels.sanitize]; per lo stesso indice vale la prima voce.
+     */
+    private fun decodeLabels(element: JsonElement?, ruleCount: Int): Map<Int, List<String>> {
+        val array = element as? JsonArray ?: return emptyMap()
+        val result = HashMap<Int, List<String>>()
+        for (item in array.take(ruleCount)) {
+            val entry = item as? JsonObject ?: continue
+            val index = (entry["rule"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: continue
+            if (index !in 0 until ruleCount || index in result) continue
+            val names = (entry["names"] as? JsonArray)
+                ?.take(MAX_LABEL_CANDIDATES)
+                ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.content }
+                ?: continue
+            RuleLabels.sanitize(names).takeIf { it.isNotEmpty() }?.let { result[index] = it }
+        }
+        return result
     }
 
     fun decode(text: String): DecodedBackup {
@@ -88,7 +143,16 @@ object RulesBackupCodec {
             return DecodedBackup.Rejected(BackupFailure.TOO_MANY_RULES)
         }
         if (rules.isEmpty()) return DecodedBackup.Rejected(BackupFailure.NO_RULES)
-        return DecodedBackup.Entries(rules.map(::decodeEntry))
+        val labels = decodeLabels(obj[LABELS_KEY], rules.size)
+        return DecodedBackup.Entries(
+            rules.mapIndexed { index, element ->
+                when (val entry = decodeEntry(element)) {
+                    is DecodedEntry.Rule -> labels[index]?.let { DecodedEntry.Rule(entry.rule.copy(labels = it)) } ?: entry
+                    is DecodedEntry.Discarded -> entry
+                }
+            },
+            state = BackupStateCodec.decode(obj),
+        )
     }
 
     private fun decodeEntry(element: JsonElement): DecodedEntry {
@@ -138,4 +202,8 @@ object RulesBackupCodec {
     }
 
     private val ENTRY_KEYS = setOf("enabled", "draft")
+    private const val LABELS_KEY = "labels"
+
+    /** Nomi letti al più per regola prima di [RuleLabels.sanitize]: un elenco enorme non va nemmeno scorso. */
+    private const val MAX_LABEL_CANDIDATES = 50
 }

@@ -28,11 +28,14 @@ import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.CallEnd
+import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MyLocation
@@ -47,6 +50,8 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,6 +85,7 @@ import dev.argus.engine.safety.Severity
 import dev.argus.ui.R
 import dev.argus.ui.components.ArgusButton
 import dev.argus.ui.components.ArgusCard
+import dev.argus.ui.components.ArgusListRow
 import dev.argus.ui.components.ArgusIconButton
 import dev.argus.ui.components.ArgusLargeTopBar
 import dev.argus.ui.components.BudgetLimitsDialog
@@ -92,8 +98,10 @@ import dev.argus.ui.components.HealthTileLevel
 import dev.argus.ui.components.BannerTone
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.OutlineChip
+import dev.argus.ui.components.HealthAlertsSettingRow
 import dev.argus.ui.components.PauseSettingRow
 import dev.argus.ui.components.PrivilegesSection
+import dev.argus.ui.components.AutoBackupActions
 import dev.argus.ui.components.RulesBackupSection
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusChip
@@ -206,6 +214,8 @@ fun SettingsScreen(
                 HealthSection(healthItems, needsFix, Modifier.sectionAnchor(SECTION_HEALTH))
                 PrivilegesSection(state.privileged, callbacks::onSetRootEnabled, callbacks::onGrantPermanent)
                 PauseSettingRow(state.automationsPaused, callbacks::onSetAutomationsPaused)
+                ModesEntryRow(callbacks::onOpenModes)
+                HealthAlertsSettingRow(state.healthAlertsEnabled, callbacks::onSetHealthAlertsEnabled)
                 BrainSection(
                     transport = state.transport,
                     onTest = callbacks::onTestConnection,
@@ -217,6 +227,7 @@ fun SettingsScreen(
                 )
                 PrivacySection(state.privacyAccepted, { confirmPrivacyRevoke = true }, Modifier.sectionAnchor(SECTION_PRIVACY))
                 WhitelistSection(state.whitelist, callbacks, Modifier.sectionAnchor(SECTION_WHITELIST))
+                SecretsEntryRow(callbacks::onOpenSecrets)
                 BudgetSection(state.budget, callbacks, Modifier.sectionAnchor(SECTION_BUDGET))
                 RulesBackupSection(
                     state.backup,
@@ -224,6 +235,16 @@ fun SettingsScreen(
                     callbacks::onImportRules,
                     callbacks::onDismissBackupResult,
                     callbacks::onOpenImportedRules,
+                    onImportTextChange = callbacks::onImportTextChange,
+                    onImportText = callbacks::onImportText,
+                    onSubmitImportPassphrase = callbacks::onSubmitImportPassphrase,
+                    autoBackupActions = AutoBackupActions(
+                        onSetEnabled = callbacks::onSetAutoBackupEnabled,
+                        onChooseFolder = callbacks::onChooseAutoBackupFolder,
+                        onSetFrequency = callbacks::onSetAutoBackupFrequency,
+                        onSetPassphrase = callbacks::onSetAutoBackupPassphrase,
+                        onRunNow = callbacks::onRunAutoBackupNow,
+                    ),
                 )
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)
@@ -239,6 +260,7 @@ fun SettingsScreen(
             onSaveProvider = callbacks::onSaveProviderConfig,
             providerChoices = state.providerChoices,
             onSelectProvider = callbacks::onSelectProvider,
+            onRemoveKey = callbacks::onRemoveProviderKey,
         )
     }
     if (confirmPrivacyRevoke) {
@@ -456,6 +478,51 @@ private fun buildHealthItems(state: SettingsState, callbacks: SettingsCallbacks)
                 stringResource(if (state.bluetoothTriggerGranted) R.string.settings_bt_on else R.string.settings_bt_off),
                 okOrOptIn(state.bluetoothTriggerGranted), callbacks::onRequestBluetoothPermission,
                 actionLabel = enable.takeIf { !state.bluetoothTriggerGranted },
+            ),
+        )
+        // 0.8: SMS e chiamate in uscita, filtro chiamate e contatti: opt-in come i trigger telefonia, il tocco
+        // chiede il permesso (o il ruolo). Senza telefonia le righe di SMS, chiamate e filtro non servono.
+        if (state.telephonyAvailable) {
+            add(
+                HealthSpec(
+                    Icons.Rounded.Sms, stringResource(R.string.tel08_settings_send_sms_title),
+                    stringResource(if (state.sendSmsGranted) R.string.tel08_settings_send_sms_on else R.string.tel08_settings_send_sms_off),
+                    okOrOptIn(state.sendSmsGranted), callbacks::onRequestSendSmsPermission,
+                    actionLabel = enable.takeIf { !state.sendSmsGranted },
+                ),
+            )
+            add(
+                HealthSpec(
+                    Icons.Rounded.Call, stringResource(R.string.tel08_settings_call_phone_title),
+                    stringResource(if (state.callPhoneGranted) R.string.tel08_settings_call_phone_on else R.string.tel08_settings_call_phone_off),
+                    okOrOptIn(state.callPhoneGranted), callbacks::onRequestCallPhonePermission,
+                    actionLabel = enable.takeIf { !state.callPhoneGranted },
+                ),
+            )
+            add(
+                HealthSpec(
+                    Icons.Rounded.CallEnd, stringResource(R.string.tel08_settings_screening_title),
+                    stringResource(if (state.callScreeningGranted) R.string.tel08_settings_screening_on else R.string.tel08_settings_screening_off),
+                    okOrOptIn(state.callScreeningGranted), callbacks::onRequestCallScreeningRole,
+                    actionLabel = enable.takeIf { !state.callScreeningGranted },
+                ),
+            )
+        }
+        add(
+            HealthSpec(
+                Icons.Rounded.Contacts, stringResource(R.string.tel08_settings_contacts_title),
+                stringResource(if (state.contactsGranted) R.string.tel08_settings_contacts_on else R.string.tel08_settings_contacts_off),
+                okOrOptIn(state.contactsGranted), callbacks::onRequestContactsPermission,
+                actionLabel = enable.takeIf { !state.contactsGranted },
+            ),
+        )
+        // 0.8: calendario, stesso opt-in degli SMS: il tocco chiede READ_CALENDAR.
+        add(
+            HealthSpec(
+                Icons.Rounded.Event, stringResource(R.string.settings_calendar_title),
+                stringResource(if (state.calendarGranted) R.string.settings_calendar_on else R.string.settings_calendar_off),
+                okOrOptIn(state.calendarGranted), callbacks::onRequestCalendarPermission,
+                actionLabel = enable.takeIf { !state.calendarGranted },
             ),
         )
         if (state.connectivitySentinelActive) {
@@ -905,6 +972,35 @@ private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCall
     }
 }
 
+/** 0.8: la voce «Segreti» di Sistema, che apre la sua schermata. */
+@Composable
+private fun SecretsEntryRow(onOpen: () -> Unit) {
+    ArgusCard(contentPadding = PaddingValues(0.dp)) {
+        ArgusListRow(
+            title = stringResource(R.string.settings_secrets_title),
+            subtitle = stringResource(R.string.settings_secrets_subtitle),
+            leading = {
+                IconBadge(
+                    icon = Icons.Rounded.Key,
+                    container = MaterialTheme.colorScheme.primaryContainer,
+                    content = MaterialTheme.colorScheme.onPrimaryContainer,
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                )
+            },
+            trailing = {
+                Icon(
+                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            onClick = onOpen,
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+        )
+    }
+}
+
 @Composable
 private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
     Row(
@@ -924,7 +1020,12 @@ private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
             )
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(contact.displayName, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+            // 0.8: la whitelist vale per (app, conversazione): l'app si vede accanto al nome.
+            Text(
+                contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+            )
             // conversationId MASCHERATO in monospace: non esporre il numero/handle completo.
             Row(
                 modifier = Modifier
@@ -979,8 +1080,17 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks, modifi
             label = stringResource(R.string.settings_budget_tokens_month),
             modifier = Modifier.fillMaxWidth(),
             progress = tokenLimit?.let { BudgetFormat.tokenRatio(tokensUsed, it) },
-            footnote = tokenLimit?.let { stringResource(R.string.settings_budget_limit, BudgetFormat.tokensCapLabel(tokensUsed, it)) },
-        ) { SystemMediumValue(BudgetFormat.tokensLabel(budget.tokensInMonth, budget.tokensOutMonth)) }
+            footnote = tokenLimit?.let {
+                stringResource(
+                    R.string.settings_budget_limit,
+                    BudgetFormat.tokensCapLabel(tokensUsed, it, estimated = budget.tokensMonthEstimated),
+                )
+            },
+        ) {
+            SystemMediumValue(
+                BudgetFormat.tokensLabel(budget.tokensInMonth, budget.tokensOutMonth, estimated = budget.tokensMonthEstimated),
+            )
+        }
         val costLimit = budget.costLimitMicros?.takeIf { it > 0L }
         SystemMeterCard(
             label = stringResource(R.string.settings_budget_cost_month),
@@ -994,6 +1104,15 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks, modifi
                 budget.perProvider.map { provider ->
                     @Composable { ProviderUsageCard(provider, notAvailable) }
                 },
+            )
+        }
+        val defaultDayLimit = budget.limitDay
+        if (budget.defaultLimitActive && defaultDayLimit != null) {
+            Text(
+                stringResource(R.string.settings_budget_default_note, defaultDayLimit),
+                modifier = Modifier.padding(horizontal = ArgusSpacing.Unit),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
             )
         }
         Text(
@@ -1061,8 +1180,8 @@ private fun ProviderUsageCard(provider: ProviderUsageUi, notAvailable: String) {
                 TableCell(stringResource(R.string.rda_ls_budget_col_day), Modifier.weight(1f), header = true)
                 TableCell(stringResource(R.string.rda_ls_budget_col_month), Modifier.weight(1f), header = true)
             }
-            TokenRow(stringResource(R.string.rda_ls_budget_in), provider.tokensInHour, provider.tokensInDay, provider.tokensInMonth, notAvailable)
-            TokenRow(stringResource(R.string.rda_ls_budget_out), provider.tokensOutHour, provider.tokensOutDay, provider.tokensOutMonth, notAvailable)
+            TokenRow(stringResource(R.string.rda_ls_budget_in), provider.tokensInHour, provider.tokensInDay, provider.tokensInMonth, notAvailable, provider.tokensEstimated)
+            TokenRow(stringResource(R.string.rda_ls_budget_out), provider.tokensOutHour, provider.tokensOutDay, provider.tokensOutMonth, notAvailable, provider.tokensEstimated)
         }
         provider.reasoningTokensMonth?.let { reasoningTokens ->
             Text(
@@ -1090,14 +1209,15 @@ private fun ProviderUsageCard(provider: ProviderUsageUi, notAvailable: String) {
 }
 
 @Composable
-private fun TokenRow(label: String, hour: Long?, day: Long?, month: Long?, notAvailable: String) {
+private fun TokenRow(label: String, hour: Long?, day: Long?, month: Long?, notAvailable: String, estimated: Boolean = false) {
     Column {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
             TableCell(label, Modifier.weight(1.1f), header = true, start = true)
             listOf(hour, day, month).forEach { value ->
                 TableCell(
-                    value?.let { BudgetFormat.grouped(it) } ?: notAvailable,
+                    // «≈»: il provider non riporta l'uso, Argus lo stima dalle lunghezze.
+                    value?.let { (if (estimated) BudgetFormat.ESTIMATE_MARK else "") + BudgetFormat.grouped(it) } ?: notAvailable,
                     Modifier.weight(1f),
                     missing = value == null,
                 )
@@ -1147,6 +1267,27 @@ private fun RerunRow(onRerun: () -> Unit) {
             )
             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         }
+    }
+}
+
+/** 0.8: riga che apre Sistema › Modalità (modalità attiva, elenco, variabili salvate). */
+@Composable
+private fun ModesEntryRow(onOpen: () -> Unit) {
+    ArgusCard(Modifier.fillMaxWidth().testTag("settings_modes"), contentPadding = PaddingValues(0.dp)) {
+        ArgusListRow(
+            title = stringResource(R.string.settings_modes_title),
+            subtitle = stringResource(R.string.settings_modes_subtitle),
+            onClick = onOpen,
+            trailing = {
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            },
+            contentPadding = PaddingValues(start = 14.dp, top = ArgusSpacing.Medium, bottom = ArgusSpacing.Medium),
+        )
     }
 }
 
@@ -1266,6 +1407,15 @@ private fun SettingsBudgetMissingValuesPreview() = SettingsPreview(
                 ProviderUsageUi("openrouter", "OpenRouter", callsHour = 0, callsDay = 4, costMonthMicros = null, tokensInMonth = 1_200),
             ),
         ),
+    ),
+)
+
+/** Mai salvato limiti: il tetto di default di 200 chiamate al giorno, con la sua nota. */
+@ArgusThemePreviews
+@Composable
+private fun SettingsBudgetDefaultLimitPreview() = SettingsPreview(
+    Fixtures.settingsAllGreen.copy(
+        budget = BudgetUi(usedHour = 2, usedDay = 9, limitDay = 200, defaultLimitActive = true),
     ),
 )
 

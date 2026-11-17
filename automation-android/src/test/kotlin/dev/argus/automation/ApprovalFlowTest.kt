@@ -2,6 +2,9 @@ package dev.argus.automation
 
 import dev.argus.automation.apps.AssumeAllInstalled
 import dev.argus.automation.apps.InstalledPackageCheck
+import dev.argus.automation.nfc.NfcTagReadResult
+import dev.argus.automation.nfc.NfcTagReader
+import dev.argus.automation.nfc.NoNfcTagReader
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovedStateContext
@@ -9,6 +12,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.ApprovalFingerprint
@@ -16,6 +20,8 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.HttpMethod
+import dev.argus.engine.model.SecretRef
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Condition
@@ -654,6 +660,54 @@ class ApprovalFlowTest {
         assertEquals(query.canonicalId, review.verifiedStateQueries.single().queryId)
     }
 
+    // --- 0.8: un segreto che la cassaforte non ha blocca l'arm ---------------------------------------
+
+    private fun secretsDraft() = AutomationDraft(
+        name = "Home Assistant",
+        trigger = Trigger.Manual,
+        actions = listOf(
+            Action.HttpRequest(
+                HttpMethod.GET,
+                "https://ha.example.org/api/states",
+                secretHeaders = listOf(SecretRef("Authorization", "ha_token", "Bearer ")),
+                secretQuery = listOf(SecretRef("k", "other_key")),
+            ),
+        ),
+    )
+
+    @Test
+    fun `a rule naming a secret that is not saved cannot be armed and the issue names it`() = runTest {
+        val draft = secretsDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture(CapabilityRequirements.derive(draft.trigger, draft.actions), savedSecrets = { setOf("ha_token") })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        val issue = review.draft.issues.single { it.code == "secret_missing" }
+        assertEquals(Severity.ERROR, issue.severity)
+        assertEquals("other_key", issue.detail)
+        assertFalse(review.canArm)
+    }
+
+    @Test
+    fun `a rule whose secrets are all saved is armable, and an unreadable vault fails closed`() = runTest {
+        val draft = secretsDraft()
+        val available = CapabilityRequirements.derive(draft.trigger, draft.actions)
+        val ok = assertIs<DraftSubmissionResult.Ready>(
+            fixture(available, savedSecrets = { setOf("ha_token", "other_key") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(ok.draft.issues.none { it.code == "secret_missing" }, ok.draft.issues.toString())
+        assertTrue(ok.canArm)
+
+        val broken = assertIs<DraftSubmissionResult.Ready>(
+            fixture(available, savedSecrets = { error("keystore") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertEquals(
+            listOf("ha_token", "other_key"),
+            broken.draft.issues.filter { it.code == "secret_missing" }.map { it.detail },
+        )
+    }
+
     // --- 0.7.0: avviso «app non installata» (controllo fatto sul telefono) ---------------------------
 
     private fun appsDraft(
@@ -735,6 +789,180 @@ class ApprovalFlowTest {
         assertTrue(review.draft.issues.none { it.code == "app_not_installed" })
     }
 
+    // --- 0.7.2: avviso «congeli un'app di sistema» (controllo fatto sul telefono) --------------------
+
+    /** Controllo finto: nessuna app mancante, di sistema quelle di [system]. */
+    private class SystemAppsCheck(private val system: () -> Set<String>) : InstalledPackageCheck {
+        var asked: Collection<String> = emptyList()
+        override suspend fun missing(packages: Collection<String>): Set<String> = emptySet()
+        override suspend fun systemApps(packages: Collection<String>): Set<String> {
+            asked = packages
+            return system()
+        }
+    }
+
+    @Test
+    fun `freezing a system app is a warning with the package, and the rule stays armable`() = runTest {
+        val draft = appsDraft(
+            actions = listOf(
+                Action.AppControl("com.oem.bloat", AppControlOp.FREEZE),
+                Action.AppControl("com.example.game", AppControlOp.FREEZE),
+                Action.AppControl("com.oem.bloat", AppControlOp.FREEZE),
+                // Fermare o scongelare un'app di sistema non è congelarla: nessun avviso.
+                Action.AppControl("com.oem.music", AppControlOp.FORCE_STOP),
+            ),
+        )
+        val check = SystemAppsCheck { setOf("com.oem.bloat", "com.oem.music") }
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, check).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertEquals(listOf("com.oem.bloat", "com.example.game"), check.asked.toList())
+        val issue = review.draft.issues.single { it.code == "app_control_freeze_system" }
+        assertEquals(Severity.WARNING, issue.severity)
+        assertEquals("com.oem.bloat", issue.detail)
+        assertTrue(review.canArm)
+    }
+
+    @Test
+    fun `no freeze or a failing system check adds no freeze warning`() = runTest {
+        val stop = appsDraft(actions = listOf(Action.AppControl("com.oem.bloat", AppControlOp.FORCE_STOP)))
+        val unasked = SystemAppsCheck { setOf("com.oem.bloat") }
+        val first = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(stop, unasked).flow.submit(CompileResult("ok", stop, null)),
+        ).review
+        assertTrue(first.draft.issues.none { it.code == "app_control_freeze_system" })
+        assertEquals(emptyList(), unasked.asked.toList())
+
+        val freeze = appsDraft(actions = listOf(Action.AppControl("com.oem.bloat", AppControlOp.FREEZE)))
+        val second = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(freeze, SystemAppsCheck { error("boom") }).flow.submit(CompileResult("ok", freeze, null)),
+        ).review
+        assertTrue(second.draft.issues.none { it.code == "app_control_freeze_system" })
+    }
+
+    // --- 0.8: tag NFC letto all'attivazione -------------------------------------------------------
+
+    private fun nfcDraft(actions: List<Action> = listOf(Action.SetWifi(false))) = AutomationDraft(
+        name = "Tag della scrivania",
+        trigger = Trigger.NfcTag(resolveTag = true),
+        actions = actions,
+    )
+
+    private val nfcCapabilities = setOf(CapabilityIds.TRIGGER_NFC_TAG, ActionCapabilities.SET_WIFI, ActionCapabilities.RUN_SHELL)
+
+    @Test
+    fun `the tag is read at arm and written into the signed rule`() = runTest {
+        var registered: Automation? = null
+        var reads = 0
+        val fixture = fixture(
+            available = nfcCapabilities,
+            registrar = ArmedAutomationRegistrar { registered = it; true },
+            nfcTags = NfcTagReader { reads++; NfcTagReadResult.Read("04:A2:19:B3") },
+        )
+        val ready = assertIs<DraftSubmissionResult.Ready>(fixture.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+        // In approvazione il tag non è ancora letto: niente lettura prima di «Arma».
+        assertEquals(0, reads)
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(ready.draft.snapshot.id, ready.draft.snapshot.revision, ready.draft.snapshot.fingerprint),
+        ).automation
+        assertEquals(1, reads)
+        assertEquals(Trigger.NfcTag("04:A2:19:B3", resolveTag = false), armed.trigger)
+        assertEquals(armed, registered)
+        assertEquals(armed.approvalFingerprint, ApprovalFingerprints.of(armed))
+    }
+
+    @Test
+    fun `a tag that is not read arms nothing and says why`() = runTest {
+        listOf(NfcTagReadResult.NfcOff, NfcTagReadResult.Cancelled, NfcTagReadResult.TimedOut).forEach { outcome ->
+            val fixture = fixture(available = nfcCapabilities, nfcTags = NfcTagReader { outcome })
+            val ready = assertIs<DraftSubmissionResult.Ready>(fixture.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+            val result = fixture.flow.arm(ready.draft.snapshot.id, ready.draft.snapshot.revision, ready.draft.snapshot.fingerprint)
+            assertEquals(FlowArmResult.NfcTagNotRead(outcome), result)
+            assertEquals(emptyList(), fixture.store.all().filter { it.status == AutomationStatus.ARMED })
+        }
+    }
+
+    @Test
+    fun `before android 15 an nfc rule with shell arms with a warning`() = runTest {
+        val shell = nfcDraft(listOf(Action.RunShell("svc wifi disable")))
+        val old = fixture(available = nfcCapabilities, nfcScansVerifiable = false)
+        val warned = assertIs<DraftSubmissionResult.Ready>(old.flow.submit(CompileResult("ok", shell, null))).review
+        assertTrue(warned.canArm)
+        assertTrue(warned.draft.issues.any { it.code == "nfc_scan_unverifiable" && it.severity == Severity.WARNING })
+
+        val plain = assertIs<DraftSubmissionResult.Ready>(old.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+        assertFalse(plain.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+
+        val recent = fixture(available = nfcCapabilities, nfcScansVerifiable = true)
+        val clean = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", shell, null))).review
+        assertFalse(clean.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+        // Dalla 15 la prova dipende dal servizio NFC: un avviso più lieve, mai un blocco.
+        assertTrue(clean.canArm)
+        assertEquals(Severity.WARNING, clean.draft.issues.single { it.code == "nfc_scan_verified_only" }.severity)
+        val nested = nfcDraft(listOf(Action.If(Condition.BooleanLiteral(true), then = listOf(Action.RunShell("svc wifi disable")))))
+        val nestedReview = assertIs<DraftSubmissionResult.Ready>(old.flow.submit(CompileResult("ok", nested, null))).review
+        assertTrue(nestedReview.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+        val plainRecent = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+        assertFalse(plainRecent.draft.issues.any { it.code.startsWith("nfc_scan") })
+    }
+
+    // --- 0.8: le modalità nominate da una regola devono esistere sul telefono --------------------------
+
+    private fun modesDraft() = AutomationDraft(
+        name = "Arrivo a casa",
+        trigger = Trigger.UserModeChanged("Lavoro"),
+        conditions = Condition.Not(Condition.UserModeIs("notte")),
+        actions = listOf(Action.SetUserMode("casa")),
+    )
+
+    private fun modesFixture(draft: AutomationDraft, names: UserModeNames) = fixture(
+        available = CapabilityRequirements.derive(draft),
+        userModes = names,
+    )
+
+    @Test
+    fun `a rule that names a mode that does not exist cannot be armed, one error per missing name`() = runTest {
+        val draft = modesDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { listOf("lavoro") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        val missing = review.draft.issues.filter { it.code == "user_mode_unknown" }
+        assertEquals(listOf("notte", "casa"), missing.map { it.detail })
+        assertTrue(missing.all { it.severity == Severity.ERROR })
+        assertFalse(review.canArm)
+    }
+
+    @Test
+    fun `existing modes match ignoring case and an unreadable list fails closed`() = runTest {
+        val draft = modesDraft()
+        val ok = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { listOf("LAVORO", "Notte", "CASA") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(ok.draft.issues.none { it.code.startsWith("user_mode") }, "${ok.draft.issues}")
+        assertTrue(ok.canArm, "${ok.draft.issues}")
+
+        val unreadable = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { error("db") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertEquals(Severity.ERROR, unreadable.draft.issues.single { it.code == "user_mode_unavailable" }.severity)
+        assertFalse(unreadable.canArm)
+    }
+
+    @Test
+    fun `a rule without modes never reads the mode list`() = runTest {
+        val draft = appsDraft(actions = listOf(Action.SetWifi(false)))
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture(
+                available = CapabilityRequirements.derive(draft.trigger, draft.actions),
+                userModes = UserModeNames { error("non va letta") },
+            ).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(review.draft.issues.none { it.code.startsWith("user_mode") })
+    }
+
     private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(
         name = "Luci al tramonto",
         trigger = Trigger.Time(tz = "Europe/Rome", solar = spec),
@@ -751,6 +979,10 @@ class ApprovalFlowTest {
         whitelisted: Set<String> = emptySet(),
         audit: ArmAuditRecorder = ArmAuditRecorder(),
         installedPackages: InstalledPackageCheck = AssumeAllInstalled,
+        nfcTags: NfcTagReader = NoNfcTagReader,
+        nfcScansVerifiable: Boolean = true,
+        userModes: UserModeNames = UserModeNames { emptyList() },
+        savedSecrets: suspend () -> Set<String> = { emptySet() },
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
@@ -778,6 +1010,10 @@ class ApprovalFlowTest {
             newDraftId = { DraftId("draft-${repository.count + 1}") },
             newAutomationId = { AutomationId("automation-${repository.count + 1}") },
             installedPackages = installedPackages,
+            nfcTags = nfcTags,
+            nfcScansVerifiable = { nfcScansVerifiable },
+            userModes = userModes,
+            savedSecrets = savedSecrets,
         )
         return Fixture(flow, store, repository, audit)
     }

@@ -11,10 +11,16 @@ data class FireClaimRequest(
     val executionId: ExecutionId,
     val atMillis: Long,
     val cooldownMs: Long,
+    /**
+     * 0.8: la fine di una regola-intervallo deduplica i suoi eventi ma non tocca la pausa dell'inizio (né la
+     * consulta): con [SpanPhase.EXIT] il claim è solo deduplica ed eleggibilità, [cooldownMs] deve essere 0.
+     */
+    val phase: SpanPhase = SpanPhase.START,
 ) {
     init {
         require(atMillis >= 0) { "atMillis non può essere negativo" }
         require(cooldownMs >= 0) { "cooldownMs non può essere negativo" }
+        require(phase == SpanPhase.START || cooldownMs == 0L) { "La fine di un intervallo non usa la pausa dell'inizio" }
     }
 }
 

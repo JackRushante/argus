@@ -31,6 +31,18 @@ enum class ValueProvenance {
     ENGINE,
     /** Segreto proveniente da un credential vault: mai esportabile al Brain o a sink remoti. */
     CREDENTIAL,
+
+    /** 0.8 scaffold: valore conservato fra le esecuzioni ([VarBinding.Stored]). */
+    STORED,
+
+    /** 0.8 scaffold: la scelta dell'utente in una domanda ([Action.Ask]). */
+    USER,
+
+    /** 0.8 scaffold: la risposta di un server ([Action.HttpRequest] con `captureAs`). */
+    NETWORK,
+
+    /** 0.8: il titolo di un evento del calendario ([Trigger.CalendarEvent]); un invito lo scrive un altro. */
+    CALENDAR,
 }
 
 fun joinIntegrity(a: IntegrityLabel, b: IntegrityLabel): IntegrityLabel =
@@ -92,7 +104,11 @@ sealed interface VarBinding {
         override val confidentiality: ConfidentialityLabel,
     ) : VarBinding
 
-    /** Reader locale approvato: integrità CLEAN, tipo/versione/floor P3 espliciti. */
+    /**
+     * Reader locale approvato, tipo/versione/floor P3 espliciti. L'integrità dipende da cosa si legge
+     * (v. [integrity]): il testo dei lettori parametrici può venire da altri (nome della rete, titolo
+     * del brano, nome di un dispositivo Bluetooth) ed è TAINTED.
+     */
     @Serializable
     @SerialName("state")
     data class State(
@@ -143,16 +159,41 @@ sealed interface VarBinding {
         override val confidentiality: ConfidentialityLabel = ConfidentialityLabel.PUBLIC,
     ) : VarBinding
 
+    /**
+     * 0.8 scaffold ([FeatureGate.VAR_STORED]): il valore conservato [key] fra un'esecuzione e l'altra,
+     * letto come [valueType]. La sua integrità non è fissa: è l'etichetta salvata col valore. Finché lo
+     * store non esiste si tratta come TAINTED ovunque (fail-closed).
+     */
+    @Serializable
+    @SerialName("stored")
+    data class Stored(
+        override val name: String,
+        val key: String,
+        val valueType: StateValueType,
+        override val confidentiality: ConfidentialityLabel,
+    ) : VarBinding
+
     companion object {
         val NAME_REGEX = Regex("^[a-z][a-z0-9_]{0,31}$")
     }
 }
 
+/**
+ * Integrità calcolata dal binding approvato, mai serializzata: cambiarla non tocca le impronte.
+ * Uno stato è CLEAN solo se il suo valore non può portare testo scelto da altri: un reader `builtin`
+ * (valori enumerati) oppure un tipo NUMBER/BOOLEAN, che l'interprete inserisce in forma canonica.
+ * Il testo di `setting`, `system_property`, `sysfs` e `dumpsys_field` è TAINTED.
+ */
 val VarBinding.integrity: IntegrityLabel
     get() = when (this) {
-        is VarBinding.Literal, is VarBinding.State, is VarBinding.RandomInt -> IntegrityLabel.CLEAN
+        is VarBinding.Literal, is VarBinding.RandomInt -> IntegrityLabel.CLEAN
+        is VarBinding.State ->
+            if (query is StateQuery.Builtin || valueType != StateValueType.TEXT) IntegrityLabel.CLEAN
+            else IntegrityLabel.TAINTED
         is VarBinding.TriggerPayload -> IntegrityLabel.TAINTED
         is VarBinding.ClockTime -> IntegrityLabel.CLEAN
+        // Etichetta salvata col valore, ignota prima dello scatto: TAINTED finché lo store non esiste.
+        is VarBinding.Stored -> IntegrityLabel.TAINTED
     }
 
 val VarBinding.declaredType: VarType
@@ -162,6 +203,7 @@ val VarBinding.declaredType: VarType
         is VarBinding.RandomInt -> VarType.NUMBER
         is VarBinding.TriggerPayload -> VarType.TEXT
         is VarBinding.ClockTime -> VarType.TEXT
+        is VarBinding.Stored -> valueType.toVarType()
     }
 
 fun StateValueType.toVarType(): VarType = when (this) {
@@ -175,6 +217,7 @@ fun VarBinding.provenance(trigger: Trigger): Set<ValueProvenance> = when (this) 
     is VarBinding.State -> setOf(ValueProvenance.DEVICE_STATE)
     is VarBinding.RandomInt -> setOf(ValueProvenance.ENGINE)
     is VarBinding.ClockTime -> setOf(ValueProvenance.ENGINE)
+    is VarBinding.Stored -> setOf(ValueProvenance.STORED)
     is VarBinding.TriggerPayload -> when (trigger) {
         is Trigger.Notification -> setOf(ValueProvenance.NOTIFICATION)
         is Trigger.PhoneState -> when (trigger.event) {
@@ -182,6 +225,7 @@ fun VarBinding.provenance(trigger: Trigger): Set<ValueProvenance> = when (this) 
             PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL ->
                 setOf(ValueProvenance.PHONE)
         }
+        is Trigger.CalendarEvent -> setOf(ValueProvenance.CALENDAR)
         else -> emptySet() // DraftValidator impedisce questa combinazione.
     }
 }

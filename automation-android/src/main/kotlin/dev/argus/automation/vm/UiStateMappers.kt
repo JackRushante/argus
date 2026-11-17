@@ -5,20 +5,29 @@ import dev.argus.automation.privileged.ScreenshotLogDetail
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
+import dev.argus.engine.directboot.BeforeUnlockCodes
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.ActionTypeIds
+import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.CallerScopeGate
+import dev.argus.engine.runtime.ConfirmationCodes
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.OmittedSteps
 import dev.argus.engine.runtime.PauseCodes
+import dev.argus.engine.runtime.ProgramInterpreter
+import dev.argus.engine.runtime.SpanCodes
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.AutomationRow
+import dev.argus.ui.model.ProgramNode
+import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
 import dev.argus.ui.model.StatusBadge
@@ -48,6 +57,8 @@ internal fun Automation.toAutomationRow(
     pendingEditDraftId: String? = null,
     /** Sveglia persistita della regola: da qui si legge il vero «prossimo scatto» dei ritardi relativi. */
     scheduledAlarm: ScheduledTimeAlarmEntity? = null,
+    /** 0.7.2: nome delle app per package (dal telefono), per la ricerca. */
+    appLabels: Map<String, String> = emptyMap(),
 ): AutomationRow {
     val render = RuleRenderMapper.map(this, conversationLabels, language)
     val nextFireAt = nextFireAtMillis(this, nowMillis, scheduledAlarm)
@@ -64,6 +75,8 @@ internal fun Automation.toAutomationRow(
         nextFireLabel = nextFireAt?.let { dayTimeLabel(it, nowMillis, language) },
         pendingEditDraftId = pendingEditDraftId,
         nextFireAtMillis = nextFireAt,
+        actionSummary = render.actionSummary(),
+        appNames = appNamesOf(trigger, actions, appLabels),
     )
 }
 
@@ -71,6 +84,8 @@ internal fun PendingDraft.toAutomationRow(
     review: ApprovalFlowReview?,
     conversationLabels: Map<String, String> = emptyMap(),
     language: RenderLanguage = RenderLanguage.system(),
+    /** 0.7.2: nome delle app per package (dal telefono), per la ricerca. */
+    appLabels: Map<String, String> = emptyMap(),
 ): AutomationRow {
     val render = RuleRenderMapper.mapDraft(draft, conversationLabels, language)
     return AutomationRow(
@@ -86,7 +101,36 @@ internal fun PendingDraft.toAutomationRow(
             .isNotEmpty(),
         lastFiredLabel = null,
         nextFireLabel = null,
+        actionSummary = render.actionSummary(),
+        appNames = appNamesOf(draft.trigger, draft.actions, appLabels),
     )
+}
+
+/**
+ * 0.7.2: le azioni della regola in breve per la riga della lista, dai tipi ([RuleRender], mai dalla prosa del
+ * modello): le etichette delle azioni, senza doppioni, al più tre e poi «…». Per un programma P4 le foglie.
+ */
+internal fun RuleRender.actionSummary(): String? {
+    val labels = actions.map { it.label }.ifEmpty { program.flatMap(::leafLabels) }
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
+    if (labels.isEmpty()) return null
+    return labels.take(MAX_SUMMARY_ACTIONS).joinToString(", ") + if (labels.size > MAX_SUMMARY_ACTIONS) ", …" else ""
+}
+
+private const val MAX_SUMMARY_ACTIONS = 3
+
+private fun leafLabels(node: ProgramNode): List<String> = when (node) {
+    is ProgramNode.Leaf -> listOf(node.row.label)
+    is ProgramNode.IfNode -> node.then.flatMap(::leafLabels) + node.orElse.flatMap(::leafLabels)
+    is ProgramNode.WhileNode -> node.body.flatMap(::leafLabels)
+}
+
+/** 0.7.2: nomi delle app che la regola nomina (quelli che il telefono conosce), per la ricerca. */
+internal fun appNamesOf(trigger: Trigger, actions: List<Action>, appLabels: Map<String, String>): List<String> {
+    if (appLabels.isEmpty()) return emptyList()
+    return AppPackages.packagesToCheck(trigger, actions).mapNotNull(appLabels::get).distinct()
 }
 
 internal fun reviewWarnings(
@@ -113,8 +157,12 @@ internal fun AuditLogRecord.toLogRow(
     actions: List<ActionResultEntity>,
     language: RenderLanguage = RenderLanguage.system(),
 ): LogRow {
-    val outcome = if (kind == AuditKind.BLOCKED_POLICY && detail == PauseCodes.PAUSED) {
+    val outcome = if (kind == AuditKind.BLOCKED_POLICY && (detail == PauseCodes.PAUSED || detail == PauseCodes.GROUP_PAUSED)) {
         // F21: uno scatto saltato per la pausa non e' un guasto: ambra, non rosso.
+        // 0.7.2: lo stesso per la pausa di un gruppo.
+        LogOutcome.PARTIAL
+    } else if (kind == AuditKind.SUPPRESSED_NOT_ELIGIBLE && detail in USER_PROMPT_CODES) {
+        // 0.8: una conferma in attesa, annullata o scaduta, una domanda senza risposta: ambra, non un guasto.
         LogOutcome.PARTIAL
     } else {
         executionStatus.toLogOutcome(kind)
@@ -125,7 +173,16 @@ internal fun AuditLogRecord.toLogRow(
         automationName = automationName ?: language.pick("Deleted automation", "Automazione rimossa"),
         kind = kind,
         outcome = outcome,
-        summary = auditSummary(this, language),
+        // 0.8: la fine di una regola-intervallo (valori rimessi e azioni di fine) si distingue dall'inizio.
+        summary = auditSummary(this, language).let { text ->
+            when {
+                kind == AuditKind.FIRED && detail == SpanCodes.EXIT -> language.pick("End: ", "Fine: ") + text
+                // 0.8: ran before the first unlock, imported into the Log after unlock.
+                kind == AuditKind.FIRED && detail == BeforeUnlockCodes.FIRED ->
+                    language.pick("Before unlock: ", "Prima dello sblocco: ") + text
+                else -> text
+            }
+        },
         expandedDetail = actions.takeIf(List<ActionResultEntity>::isNotEmpty)
             ?.map { actionDetail(it, language) },
         automationId = automationId.takeIf { automationName != null },
@@ -146,6 +203,10 @@ private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
     // Gli altri eventi lifecycle sono transizioni riuscite, non esiti di esecuzione.
     kind == AuditKind.RULE_ARMED || kind == AuditKind.RULE_DISABLED ||
         kind == AuditKind.RULE_ENABLED || kind == AuditKind.RULE_DELETED -> LogOutcome.SUCCESS
+    // 0.8: decisione del filtro chiamate, un evento informativo come il ciclo di vita.
+    kind == AuditKind.CALL_SCREENED -> LogOutcome.SUCCESS
+    // 0.8: the option «active before unlock» switched itself off: informative, like the lifecycle.
+    kind == AuditKind.BEFORE_UNLOCK_OFF -> LogOutcome.SUCCESS
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
     this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
     // Risposta AI bloccata dal budget: non e' un successo, e' un avviso (ambra).
@@ -218,15 +279,23 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
     } else {
         l.pick("blocked by the LLM budget", "bloccata dal budget LLM")
     }
-    AuditKind.SUPPRESSED_NOT_ELIGIBLE -> l.pick(
-        "rule is no longer eligible",
-        "regola non più idonea",
-    )
+    // 0.8: conferme e domande senza risposta hanno il loro codice chiuso, non sono un guasto.
+    AuditKind.SUPPRESSED_NOT_ELIGIBLE -> if (record.detail in USER_PROMPT_CODES) {
+        LogReasonLabels.text(record.detail, l).replaceFirstChar { it.uppercase() }
+    } else {
+        l.pick(
+            "rule is no longer eligible",
+            "regola non più idonea",
+        )
+    }
     AuditKind.CONDITIONS_NOT_MET -> when (record.detail) {
         "condition_state_unavailable" -> l.pick(
             "required state unavailable",
             "stato necessario non disponibile",
         )
+        // 0.8: `screen_call` «solo chi non è nei contatti»: la regola non vale per questa chiamata.
+        CallerScopeGate.KNOWN_CALLER, CallerScopeGate.CALLER_UNVERIFIED ->
+            LogReasonLabels.text(record.detail, l).replaceFirstChar { it.uppercase() }
         else -> l.pick("conditions not met", "condizioni non soddisfatte")
     }
     AuditKind.BLOCKED_POLICY -> when (record.detail) {
@@ -237,6 +306,11 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         PauseCodes.PAUSED -> l.pick(
             "skipped: automations are paused",
             "saltata: automazioni in pausa",
+        )
+        // 0.7.2: il nome dell'etichetta non è nel Log (testo dell'utente): si dice solo che è il gruppo.
+        PauseCodes.GROUP_PAUSED -> l.pick(
+            "skipped: its label group is paused",
+            "saltata: gruppo in pausa",
         )
         else -> l.pick(
             "blocked by policy (${LogReasonLabels.text(record.detail, l)})",
@@ -280,7 +354,33 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         "Rule needs review (${record.detail.safeDiagnostic()})",
         "Regola da rivedere (${record.detail.safeDiagnostic()})",
     )
+    // 0.8: decisione del filtro chiamate, presa prima dello squillo (il numero non è nel Log).
+    AuditKind.CALL_SCREENED -> when (record.detail) {
+        "screen_call_rejected" -> l.pick("Incoming call rejected", "Chiamata in arrivo rifiutata")
+        "screen_call_silenced" -> l.pick("Incoming call silenced", "Chiamata in arrivo silenziata")
+        "screen_call_failed_open" -> l.pick(
+            "Call screening could not decide in time: the call rang",
+            "Il filtro chiamate non ha deciso in tempo: la chiamata ha squillato",
+        )
+        else -> l.pick("Incoming call screened", "Chiamata in arrivo filtrata")
+    }
+    // 0.8: the option «active before unlock» switched itself off.
+    AuditKind.BEFORE_UNLOCK_OFF -> when (record.detail) {
+        BeforeUnlockCodes.OFF_RULE_CHANGED -> l.pick(
+            "Before unlock: option switched off, the rule changed",
+            "Prima dello sblocco: opzione spenta, la regola è cambiata",
+        )
+        BeforeUnlockCodes.OFF_NOT_QUALIFYING -> l.pick(
+            "Before unlock: option switched off, the rule no longer qualifies",
+            "Prima dello sblocco: opzione spenta, la regola non è più ammessa",
+        )
+        else -> l.pick("Before unlock: option switched off", "Prima dello sblocco: opzione spenta")
+    }
 }
+
+/** 0.8: codici chiusi di «chiedimi prima» e delle domande senza risposta (audit SUPPRESSED_NOT_ELIGIBLE). */
+private val USER_PROMPT_CODES =
+    ConfirmationCodes.ALL + ProgramInterpreter.ASK_TIMEOUT + ProgramInterpreter.ASK_RESUME_STALE
 
 /** Codice con cui la lane chiude un evento già accorpato in una raffica (D8). */
 private const val COALESCED_REPLY_CODE = "coalesced"
@@ -361,6 +461,16 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SCREENSHOT -> l.pick("Screen capture", "Cattura schermata")
     ActionTypeIds.APP_PERMISSION -> l.pick("App permission", "Permesso app")
     ActionTypeIds.UI_STEPS -> l.pick("Steps on the screen", "Passi sullo schermo")
+    // 0.8 scaffold: azioni nuove (spente finché il loro FeatureGate è off).
+    ActionTypeIds.ASK -> l.pick("Ask", "Domanda")
+    ActionTypeIds.SET_STORED -> l.pick("Set stored value", "Imposta valore conservato")
+    ActionTypeIds.SET_USER_MODE -> l.pick("Set mode", "Imposta modalità")
+    ActionTypeIds.NOTIFICATION_REPLY -> l.pick("Notification reply", "Risposta alla notifica")
+    ActionTypeIds.NOTIFICATION_ACTION -> l.pick("Notification action", "Azione sulla notifica")
+    ActionTypeIds.SEND_SMS -> l.pick("Send SMS", "Invia SMS")
+    ActionTypeIds.CALL_NUMBER -> l.pick("Phone call", "Chiamata")
+    ActionTypeIds.SEND_INTENT -> l.pick("Send intent", "Invia intent")
+    ActionTypeIds.SCREEN_CALL -> l.pick("Screen call", "Filtro chiamata")
     else -> type.replace('_', ' ')
 }
 

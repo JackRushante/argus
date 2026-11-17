@@ -16,20 +16,28 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.notification.isReplyConversation
 import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
+import dev.argus.automation.health.HealthAlertStore
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
 import dev.argus.brain.ReasoningEffort
 import dev.argus.brain.ResponseTimeout
 import dev.argus.data.UsageWindows
+import dev.argus.automation.backup.AutoBackupCoordinator
+import dev.argus.automation.backup.AutoBackupSnapshot
+import dev.argus.data.backup.AutoBackupFrequency
+import dev.argus.data.backup.BackupKeyDerivation
 import dev.argus.data.backup.ExportOutcome
 import dev.argus.data.backup.BackupFailure
+import dev.argus.ui.model.AutoBackupFrequencyUi
 import dev.argus.data.backup.ImportOutcome
 import dev.argus.data.backup.RulesBackup
+import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.data.backup.isBackupExportable
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
@@ -38,11 +46,12 @@ import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.notification.ObservedConversation
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
-import dev.argus.engine.safety.DraftValidator
+import dev.argus.engine.safety.ReplyChannels
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -60,6 +69,7 @@ import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.RulesBackupKind
 import dev.argus.ui.model.RulesBackupStatus
 import dev.argus.ui.model.RulesBackupUi
+import dev.argus.ui.model.TextImportPreview
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.ModelFieldHints
@@ -108,7 +118,8 @@ private data class SettingsSources(
 )
 
 /**
- * Candidate del picker whitelist: solo conversazioni WhatsApp confermate 1:1, non ancora in
+ * Candidate del picker whitelist: solo conversazioni 1:1 confermate a cui si può rispondere (WhatsApp e,
+ * dalla 0.8, Telegram, Signal e Google Messaggi con lo shortcut di conversazione), non ancora in
  * whitelist, più recenti prima. L'inserimento manuale dell'hash resta diagnostica avanzata.
  */
 internal fun observedWhitelistCandidates(
@@ -118,13 +129,17 @@ internal fun observedWhitelistCandidates(
 ): List<ContactRow> {
     val taken = whitelisted.mapTo(hashSetOf()) { it.id }
     return observed.asSequence()
-        .filter { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
+        .filter { it.isReplyConversation() }
         .filter { it.isGroup == false }
         .filterNot { it.id in taken }
         .take(limit)
-        .map { ContactRow(displayName = it.displayName, conversationId = it.id) }
+        .map { ContactRow(displayName = it.displayName, conversationId = it.id, app = ReplyChannels.appName(it.packageName)) }
         .toList()
 }
+
+/** App di una voce di whitelist, dal package nel suo id (`<fonte>:<package>:<hash>`); null se manuale. */
+internal fun whitelistApp(conversationId: String): String? =
+    ReplyChannels.packageOf(conversationId)?.let(ReplyChannels::appName)
 
 /** Aggregati usage per le tre finestre (ora/giorno/mese), caricati da [UsageDao] in [SettingsViewModel.refresh]. */
 internal data class BudgetUsageSnapshot(
@@ -220,6 +235,8 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
             lastFinishReason = hourAgg?.lastFinishReason
                 ?: dayAgg?.lastFinishReason
                 ?: monthAgg?.lastFinishReason,
+            // Il mese contiene ora e giorno: basta guardare lì.
+            tokensEstimated = (monthAgg?.estimatedCalls ?: 0L) > 0L,
         )
     }
 
@@ -262,8 +279,10 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
         tokensInMonth = tokensInMonth,
         tokensOutMonth = tokensOutMonth,
         tokenLimitMonth = global.maxTokensPerMonth,
+        tokensMonthEstimated = tokenOnlyMonth.any { it.estimatedCalls > 0L },
         perProvider = perProvider,
         softWarningActive = softActive,
+        defaultLimitActive = settings.usingDefaults,
     )
 }
 
@@ -313,6 +332,10 @@ class SettingsViewModel @Inject constructor(
     private val pause: AutomationPauseStore,
     /** 0.5.0: backend privilegiato, root `su` e permessi permanenti. `null` solo nei test che non li provano. */
     private val privileged: PrivilegedAccessCenter? = null,
+    /** 0.7.2: backup automatico cifrato. `null` solo nei test che non lo provano (la card non si mostra). */
+    private val autoBackup: AutoBackupCoordinator? = null,
+    /** 0.7.2: interruttore degli avvisi di salute. `null` solo nei test che non lo provano. */
+    private val healthAlerts: HealthAlertStore? = null,
 ) : ViewModel() {
     /** Lingua corrente al momento in cui si produce un testo (messaggi, errori); segue il telefono. */
     private val language: RenderLanguage get() = languageSource.current
@@ -334,6 +357,19 @@ class SettingsViewModel @Inject constructor(
     /** Ultima operazione del backup delle regole (0.4.0, F1): a riposo, in corso, riuscita, fallita. */
     private val mutableBackupStatus = MutableStateFlow<RulesBackupStatus>(RulesBackupStatus.Idle)
     private val backupBusy = AtomicBoolean(false)
+
+    /** 0.7.2: anteprima di «Importa da testo». Il testo resta in memoria, mai nello stato salvato. */
+    private val textImport = TextImportPreviewer(rulesBackup, viewModelScope, { language })
+
+    /** 0.7.2: il file cifrato scelto per l'import, in attesa della passphrase. Mai nello stato UI. */
+    @Volatile
+    private var pendingEncryptedImport: Uri? = null
+
+    /** Stato dell'ultima operazione di backup e della card «Backup automatico». */
+    private val backupSources: Flow<Pair<RulesBackupStatus, AutoBackupSnapshot?>> =
+        autoBackup?.let { coordinator ->
+            combine(mutableBackupStatus, coordinator.snapshots) { status, snapshot -> status to snapshot }
+        } ?: mutableBackupStatus.map { status -> status to null }
 
     private val sources = combine(
         whitelist.observeAll(),
@@ -358,16 +394,13 @@ class SettingsViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val observed = values[5] as List<ObservedConversation>
         val shizukuIdentity = values[6] as ShizukuIdentity?
-        val geofenceNeeded = rules.any { it.trigger is Trigger.Geofence } ||
-            pending.any { it.draft.trigger is Trigger.Geofence }
+        val geofenceNeeded = rules.any { rule -> rule.listenedTriggers.any { it is Trigger.Geofence } } ||
+            pending.any { snapshot -> snapshot.draft.listenedTriggers.any { it is Trigger.Geofence } }
         val shizukuNeeded = rules.any { rule ->
             rule.requiredCapabilities.any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
         } || pending.any { snapshot ->
-            CapabilityRequirements.derive(
-                snapshot.draft.trigger,
-                snapshot.draft.actions,
-                snapshot.draft.conditions,
-            ).any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
+            CapabilityRequirements.derive(snapshot.draft)
+                .any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
         }
         SettingsSources(
             contacts = contacts,
@@ -395,9 +428,11 @@ class SettingsViewModel @Inject constructor(
         mutableKeySaved,
         // Al cambio di lingua del telefono lo stato si rigenera (etichette e testi prodotti qui).
         languageSource.language,
-        mutableBackupStatus,
+        backupSources,
         pause.paused,
         privilegedUi,
+        healthAlerts?.enabled ?: flowOf(true),
+        textImport.preview,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -408,9 +443,14 @@ class SettingsViewModel @Inject constructor(
         val budgetConfig = values[6] as BudgetSettings
         val keySaved = values[7] as Boolean?
         // values[8] = lingua, usata solo come trigger di ricarica.
-        val backupStatus = values[9] as RulesBackupStatus
+        @Suppress("UNCHECKED_CAST")
+        val backupPair = values[9] as Pair<RulesBackupStatus, AutoBackupSnapshot?>
+        val backupStatus = backupPair.first
+        val autoBackupSnapshot = backupPair.second
         val automationsPaused = values[10] as Boolean
         val privilegedState = values[11] as PrivilegedUi
+        val healthAlertsEnabled = values[12] as Boolean
+        val textPreview = values[13] as TextImportPreview
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
@@ -441,17 +481,31 @@ class SettingsViewModel @Inject constructor(
             smsTriggerGranted = health.receiveSmsGranted,
             callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
             bluetoothTriggerGranted = health.bluetoothConnectGranted,
+            telephonyAvailable = health.telephonyPresent,
+            sendSmsGranted = health.sendSmsGranted,
+            callPhoneGranted = health.callPhoneGranted,
+            callScreeningGranted = health.callScreeningRoleHeld,
+            contactsGranted = health.readContactsGranted,
+            calendarGranted = health.readCalendarGranted,
             usageAccessGranted = health.usageAccessGranted,
             connectivitySentinelActive = sentinelActive,
-            whitelist = settingsSources.contacts.map { ContactRow(it.displayName, it.id) },
+            whitelist = settingsSources.contacts.map { ContactRow(it.displayName, it.id, app = whitelistApp(it.id)) },
             observedCandidates = settingsSources.observedCandidates,
             budget = budgetUi(usageSnapshot, budgetConfig),
             privacyAccepted = settingsSources.privacyAccepted,
             appVersionLabel = appVersionLabel(),
             notificationListenerRestrictedHint =
                 !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
-            backup = RulesBackupUi(status = backupStatus, exportableRules = settingsSources.exportableRules),
+            backup = RulesBackupUi(
+                status = backupStatus,
+                exportableRules = settingsSources.exportableRules,
+                autoBackup = autoBackupSnapshot?.let {
+                    AutoBackupText.ui(it, System.currentTimeMillis(), ZoneId.systemDefault(), language)
+                },
+                textPreview = textPreview,
+            ),
             automationsPaused = automationsPaused,
+            healthAlertsEnabled = healthAlertsEnabled,
             privileged = privilegedState,
         )
     }.stateIn(
@@ -500,6 +554,16 @@ class SettingsViewModel @Inject constructor(
     fun saveBridge(url: String, bearer: String?) {
         viewModelScope.launch {
             try {
+                // S6: verso un altro server il bearer salvato non si riusa.
+                if (bearer == null && configuration.baseUrlChangesOrigin(ProviderId.HERMES, url)) {
+                    message(
+                        language.pick(
+                            "The server address changed: enter the bearer again.",
+                            "L'indirizzo del server è cambiato: inserisci di nuovo il bearer.",
+                        ),
+                    )
+                    return@launch
+                }
                 if (!configuration.saveConfiguration(url, bearer)) {
                     message(
                         language.pick(
@@ -597,12 +661,25 @@ class SettingsViewModel @Inject constructor(
         val strippedSuffix = strippedBaseUrl != null
         viewModelScope.launch {
             try {
+                // S6: un indirizzo con un'altra origine e nessuna chiave nuova = la chiave salvata si toglie
+                // (lo fa anche lo store), e l'utente lo sa.
+                val dropsKey = apiKey == null && cleanBaseUrl != null &&
+                    configuration.baseUrlChangesOrigin(id, cleanBaseUrl) && configuration.hasApiKey(id)
                 if (!configuration.saveProviderConfig(
                         id, baseUrl = cleanBaseUrl, model = model, apiKey = apiKey, reasoningEffort = effort,
                     )
                 ) {
                     message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
+                }
+                if (dropsKey) {
+                    configuration.clearApiKey(id)
+                    message(
+                        language.pick(
+                            "The server address changed, so the saved key was removed. Enter it again if the new server needs it.",
+                            "L'indirizzo del server è cambiato, quindi la chiave salvata è stata tolta. Inseriscila di nuovo se il nuovo server la richiede.",
+                        ),
+                    )
                 }
                 if (strippedSuffix) {
                     message(
@@ -629,6 +706,26 @@ class SettingsViewModel @Inject constructor(
                     ),
                 )
             }
+        }
+    }
+
+    /** «Rimuovi chiave» del foglio del provider (S6): la chiave salvata si cancella dallo storage cifrato. */
+    fun removeProviderKey(wireName: String) {
+        val id = ProviderId.fromWireName(wireName) ?: run {
+            mutableMessages.tryEmit(language.pick("Unknown provider.", "Provider sconosciuto."))
+            return
+        }
+        viewModelScope.launch {
+            val removed = cancellationSafeOrNull { configuration.clearApiKey(id) } == true
+            message(
+                if (removed) {
+                    language.pick("Key removed.", "Chiave rimossa.")
+                } else {
+                    language.pick("Unable to remove the key.", "Impossibile rimuovere la chiave.")
+                },
+            )
+            bridgeHealth.value = BridgeUiHealth()
+            refresh()
         }
     }
 
@@ -843,21 +940,75 @@ class SettingsViewModel @Inject constructor(
      */
     fun importRules(source: Uri?) {
         if (source == null) return
+        pendingEncryptedImport = null
+        runBackup(RulesBackupKind.IMPORT) { importStatus(rulesBackup.import(source), source) }
+    }
+
+    /**
+     * 0.7.2: passphrase del file cifrato scelto con [importRules]. Poi tutto come un import in chiaro: ogni
+     * regola arriva come bozza da approvare. La passphrase non entra nello stato e l'array si azzera.
+     */
+    fun submitImportPassphrase(passphrase: String) {
+        val source = pendingEncryptedImport ?: return
+        if (passphrase.isEmpty()) return
+        val chars = passphrase.toCharArray()
+        val started = runBackup(RulesBackupKind.IMPORT) {
+            try {
+                importStatus(rulesBackup.importEncrypted(source, chars), source)
+            } finally {
+                chars.fill(0.toChar())
+            }
+        }
+        if (!started) chars.fill(0.toChar())
+    }
+
+    private fun importStatus(outcome: ImportOutcome, source: Uri): RulesBackupStatus = when (outcome) {
+        is ImportOutcome.Done -> {
+            pendingEncryptedImport = null
+            val text = RulesBackupText.importSummary(outcome.summary, language)
+            // Nessuna bozza creata = l'import non ha prodotto nulla: si mostra come errore.
+            if (outcome.summary.imported > 0) {
+                RulesBackupStatus.Done(RulesBackupKind.IMPORT, text, outcome.summary.imported)
+            } else {
+                RulesBackupStatus.Failed(RulesBackupKind.IMPORT, text)
+            }
+        }
+        is ImportOutcome.Failed -> when (outcome.failure) {
+            BackupFailure.PASSPHRASE_REQUIRED -> {
+                pendingEncryptedImport = source
+                RulesBackupStatus.NeedsPassphrase()
+            }
+            BackupFailure.WRONG_PASSPHRASE -> {
+                pendingEncryptedImport = source
+                RulesBackupStatus.NeedsPassphrase(RulesBackupText.failure(outcome.failure, language))
+            }
+            else -> {
+                pendingEncryptedImport = null
+                RulesBackupStatus.Failed(RulesBackupKind.IMPORT, RulesBackupText.failure(outcome.failure, language))
+            }
+        }
+    }
+
+    /** 0.7.2, «Importa da testo»: il testo è cambiato, se ne prepara l'anteprima (vuoto = foglio chiuso). */
+    fun onImportTextChange(text: String) = textImport.onTextChange(text)
+
+    /**
+     * 0.7.2, «Importa da testo»: ogni regola valida del testo diventa una bozza da approvare, con lo stesso import
+     * di un file (limite prima del contenuto, decodifica stretta, bozze `IMPORT`). Mai una regola armata.
+     */
+    fun importText(text: String) {
+        textImport.clear()
         runBackup(RulesBackupKind.IMPORT) {
-            when (val outcome = rulesBackup.import(source)) {
-                is ImportOutcome.Done -> {
-                    val text = RulesBackupText.importSummary(outcome.summary, language)
-                    // Nessuna bozza creata = l'import non ha prodotto nulla: si mostra come errore.
-                    if (outcome.summary.imported > 0) {
-                        RulesBackupStatus.Done(RulesBackupKind.IMPORT, text, outcome.summary.imported)
-                    } else {
-                        RulesBackupStatus.Failed(RulesBackupKind.IMPORT, text)
-                    }
-                }
-                is ImportOutcome.Failed -> RulesBackupStatus.Failed(
+            val bytes = RulesBackupFormat.utf8WithinCap(text)
+                ?: return@runBackup RulesBackupStatus.Failed(
                     RulesBackupKind.IMPORT,
-                    RulesBackupText.failure(outcome.failure, language),
+                    ImportPreviewText.textFailure(BackupFailure.FILE_TOO_LARGE, language),
                 )
+            val (message, imported) = ImportPreviewText.outcome(rulesBackup.importBytes(bytes), language, text = true)
+            if (imported > 0) {
+                RulesBackupStatus.Done(RulesBackupKind.IMPORT, message, imported)
+            } else {
+                RulesBackupStatus.Failed(RulesBackupKind.IMPORT, message)
             }
         }
     }
@@ -865,11 +1016,64 @@ class SettingsViewModel @Inject constructor(
     /** Chiude il riepilogo o l'errore dell'ultima operazione (non interrompe una in corso). */
     fun dismissBackupResult() {
         if (backupBusy.get()) return
+        pendingEncryptedImport = null
         mutableBackupStatus.value = RulesBackupStatus.Idle
     }
 
-    private fun runBackup(kind: RulesBackupKind, operation: suspend () -> RulesBackupStatus) {
-        if (!backupBusy.compareAndSet(false, true)) return
+    /** 0.7.2: interruttore del backup automatico; acceso e pronto, il primo backup parte subito. */
+    fun setAutoBackupEnabled(enabled: Boolean) {
+        val coordinator = autoBackup ?: return
+        viewModelScope.launch { cancellationSafeOrNull { coordinator.setEnabled(enabled) } }
+    }
+
+    /** 0.7.2: cartella scelta con `OpenDocumentTree`; null = selettore annullato. */
+    fun chooseAutoBackupFolder(folder: Uri?) {
+        val coordinator = autoBackup ?: return
+        if (folder == null) return
+        viewModelScope.launch {
+            val adopted = cancellationSafeOrNull { coordinator.setFolder(folder.toString()) } ?: false
+            if (!adopted) message(AutoBackupText.folderRefused(language))
+        }
+    }
+
+    fun setAutoBackupFrequency(frequency: AutoBackupFrequencyUi) {
+        val coordinator = autoBackup ?: return
+        val domain = when (frequency) {
+            AutoBackupFrequencyUi.DAILY -> AutoBackupFrequency.DAILY
+            AutoBackupFrequencyUi.WEEKLY -> AutoBackupFrequency.WEEKLY
+        }
+        viewModelScope.launch { cancellationSafeOrNull { coordinator.setFrequency(domain) } }
+    }
+
+    /**
+     * 0.7.2: imposta o cambia la passphrase del backup automatico. Si deriva la chiave (qualche secondo) e
+     * si salva solo quella, avvolta dal Keystore; la passphrase non resta da nessuna parte.
+     */
+    fun setAutoBackupPassphrase(passphrase: String) {
+        val coordinator = autoBackup ?: return
+        val chars = passphrase.toCharArray()
+        if (!BackupKeyDerivation.isAcceptable(chars)) {
+            chars.fill(0.toChar())
+            viewModelScope.launch { message(AutoBackupText.passphraseTooShort(language)) }
+            return
+        }
+        viewModelScope.launch {
+            val saved = try {
+                cancellationSafeOrNull { coordinator.setPassphrase(chars) } ?: false
+            } finally {
+                chars.fill(0.toChar())
+            }
+            message(if (saved) AutoBackupText.passphraseSaved(language) else AutoBackupText.passphraseNotSaved(language))
+        }
+    }
+
+    /** 0.7.2: «Esegui backup ora». Gira nello scope dell'app: lasciare Sistema non lo interrompe. */
+    fun runAutoBackupNow() {
+        autoBackup?.requestRunNow()
+    }
+
+    private fun runBackup(kind: RulesBackupKind, operation: suspend () -> RulesBackupStatus): Boolean {
+        if (!backupBusy.compareAndSet(false, true)) return false
         mutableBackupStatus.value = RulesBackupStatus.Working(kind)
         viewModelScope.launch {
             try {
@@ -889,10 +1093,27 @@ class SettingsViewModel @Inject constructor(
                 backupBusy.set(false)
             }
         }
+        return true
     }
 
     /** F21: accende o spegne "Pausa automazioni". */
     fun setAutomationsPaused(paused: Boolean) = pause.setPaused(paused)
+
+    /** 0.7.2: «Avvisami quando una regola smette di funzionare». */
+    fun setHealthAlertsEnabled(enabled: Boolean) {
+        val store = healthAlerts ?: return
+        viewModelScope.launch {
+            try {
+                if (!store.setEnabled(enabled)) {
+                    message(language.pick("Unable to save the setting.", "Impossibile salvare l'impostazione."))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message(language.pick("Unable to save the setting.", "Impossibile salvare l'impostazione."))
+            }
+        }
+    }
 
     fun revokePrivacy() {
         viewModelScope.launch {
@@ -1043,6 +1264,12 @@ class SettingsViewModel @Inject constructor(
             smsTriggerGranted = health.receiveSmsGranted,
             callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
             bluetoothTriggerGranted = health.bluetoothConnectGranted,
+            telephonyAvailable = health.telephonyPresent,
+            sendSmsGranted = health.sendSmsGranted,
+            callPhoneGranted = health.callPhoneGranted,
+            callScreeningGranted = health.callScreeningRoleHeld,
+            contactsGranted = health.readContactsGranted,
+            calendarGranted = health.readCalendarGranted,
             usageAccessGranted = health.usageAccessGranted,
             connectivitySentinelActive = connectivitySentinelStatus.active.value,
             whitelist = emptyList(),

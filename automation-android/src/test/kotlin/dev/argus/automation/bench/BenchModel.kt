@@ -61,6 +61,8 @@ internal object BenchVocab {
         "manual",
         // 0.5.1: app aperta/chiusa.
         "app_event",
+        // 0.8 scaffold: nel modello ma spenti (FeatureGates).
+        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
     )
 
     val ACTION_TYPES: Set<String> = setOf(
@@ -107,14 +109,35 @@ internal object BenchVocab {
         ActionTypeIds.APP_PERMISSION,
         // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
         ActionTypeIds.UI_STEPS,
+        // 0.8 scaffold: nel modello ma spente (FeatureGates); nessun caso del banco le usa ancora.
+        ActionTypeIds.ASK,
+        ActionTypeIds.SET_STORED,
+        ActionTypeIds.SET_USER_MODE,
+        ActionTypeIds.NOTIFICATION_REPLY,
+        ActionTypeIds.NOTIFICATION_ACTION,
+        // 0.8: SMS, chiamate, Intent e filtro chiamate.
+        ActionTypeIds.SEND_SMS,
+        ActionTypeIds.CALL_NUMBER,
+        ActionTypeIds.SEND_INTENT,
+        ActionTypeIds.SCREEN_CALL,
     )
 
     val CONDITION_TYPES: Set<String> = setOf(
         "time_window", "state_equals", "state_compare", "app_in_foreground", "location_in",
         "and", "or", "not", "boolean_literal", "var_compare",
+        // 0.8 scaffold: nel modello ma spente (FeatureGates).
+        "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
+        "stored_compare", "user_mode_is",
     )
 
-    val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int", "clock")
+    /**
+     * 0.8 scaffold: azioni spente (FeatureGates), escluse dalla copertura minima dei casi finché il modello
+     * non le vede. Chi accende un'azione la toglie da qui e aggiunge i suoi casi.
+     */
+    val NOT_YET_AVAILABLE_ACTION_TYPES: Set<String> = setOf(
+    )
+
+    val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int", "clock", "stored")
 
     val FLOW_TYPES: Set<String> = setOf(ActionTypeIds.IF, ActionTypeIds.WHILE, ActionTypeIds.WAIT)
 
@@ -154,12 +177,19 @@ internal data class DraftExpectation(
     val conditionsInclude: List<String> = emptyList(),
     val conditionsParams: Map<String, JsonElement> = emptyMap(),
     val conditionsText: List<String> = emptyList(),
+    /** 0.8: matcher per campo del trigger di FINE di una regola-intervallo (`exit.trigger`); vuoto = nessuna attesa. */
+    val exitTrigger: Map<String, JsonElement> = emptyMap(),
+    /**
+     * 0.8: matcher sulla conferma della regola (`confirm`, l'oggetto `{"timeoutMs":…}`; assente = null), per
+     * esempio `{"present": true}`; null = nessuna attesa.
+     */
+    val confirm: JsonElement? = null,
 ) {
     val isEmpty: Boolean
         get() = trigger.isEmpty() && contact == null && cronFires.isEmpty() && cronSilent.isEmpty() &&
             at == null && actionsInclude.isEmpty() && actionsExclude.isEmpty() && actionsText.isEmpty() &&
             params.isEmpty() && vars.isEmpty() && varsExclude.isEmpty() && controlFlow.isEmpty() && conditionsInclude.isEmpty() &&
-            conditionsParams.isEmpty() && conditionsText.isEmpty()
+            conditionsParams.isEmpty() && conditionsText.isEmpty() && exitTrigger.isEmpty() && confirm == null
 }
 
 internal data class BenchCase(
@@ -211,6 +241,8 @@ internal object BenchCases {
         "outcome", "trigger", "contact", "cron_fires", "cron_silent", "at_datetime", "actions_include",
         "actions_exclude", "actions_text", "params", "vars", "vars_exclude", "control_flow", "conditions_include",
         "conditions_params", "conditions_text", "validator_errors", "reply_mentions",
+        // 0.8: la fine di una regola-intervallo e la conferma prima di eseguire.
+        "exit_trigger", "confirm",
     )
     private val AT_KEYS = setOf("days_from_today", "month_day", "time")
 
@@ -348,6 +380,14 @@ internal object BenchCases {
                 throw BenchException("$at: expect.trigger.type '${type.content}' non e' un trigger del dominio")
             }
         }
+        val exitTrigger = (expect["exit_trigger"] as? JsonObject).orEmptyObject(expect, "exit_trigger", at)
+        exitTrigger.forEach { (key, matcher) -> JsonMatch.validate(matcher, "$at.expect.exit_trigger.$key") }
+        (exitTrigger["type"] as? JsonPrimitive)?.let { type ->
+            if (!type.isString || type.content !in BenchVocab.TRIGGER_TYPES) {
+                throw BenchException("$at: expect.exit_trigger.type '${type.content}' non e' un trigger del dominio")
+            }
+        }
+        val confirm = expect["confirm"]?.also { JsonMatch.validate(it, "$at.expect.confirm") }
         val params = matcherMap(expect, "params", at)
         params.keys.forEach { path -> requireRoot(path, BenchVocab.ACTION_TYPES, "$at.expect.params") }
         val conditionsParams = matcherMap(expect, "conditions_params", at)
@@ -370,6 +410,8 @@ internal object BenchCases {
             conditionsInclude = expect.strList("conditions_include", at),
             conditionsParams = conditionsParams,
             conditionsText = expect.strList("conditions_text", at),
+            exitTrigger = exitTrigger,
+            confirm = confirm,
         )
         checkAlternatives(draft.actionsInclude, BenchVocab.ACTION_TYPES, "$at.expect.actions_include")
         checkAlternatives(draft.actionsExclude, BenchVocab.ACTION_TYPES, "$at.expect.actions_exclude")

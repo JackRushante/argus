@@ -76,6 +76,15 @@ class E2eEventFactoryTest {
         Trigger.ModeChanged(ModeKind.DND, to = "total"),
         Trigger.Media(MediaPlayState.PLAYING),
         Trigger.AppEvent("com.android.calculator2", AppEventKind.CLOSED),
+        // 0.8 scaffold: i trigger spenti hanno già il loro evento sintetico.
+        Trigger.Sensor(SensorKind.SHAKE),
+        Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
+        Trigger.CalendarEvent(dev.argus.engine.model.CalendarPhase.END, offsetMinutes = -5),
+        Trigger.NfcTag("04:AA:BB:CC"),
+        Trigger.NextAlarm(10),
+        Trigger.AppUsage("com.example.game", 30),
+        Trigger.UserModeChanged("lavoro"),
+        Trigger.UserModeChanged(),
     )
 
     @Test
@@ -158,5 +167,16 @@ class E2eEventFactoryTest {
         val built = factory.build(chat, JsonObject(mapOf("isGroup" to JsonNull)))
         assertIs<E2eEventResult.Built>(built)
         assertFalse(matcher.matches(chat.trigger, built.envelope.event))
+    }
+
+    @Test
+    fun `a calendar event carries the title only when the case passes one`() {
+        val calendar = rule(Trigger.CalendarEvent(dev.argus.engine.model.CalendarPhase.START))
+        val titled = factory.build(calendar, buildJsonObject { put("title", "Dentista") })
+        assertIs<E2eEventResult.Built>(titled)
+        assertEquals("Dentista", assertIs<TriggerEvent.CalendarEventFired>(titled.envelope.event).title)
+        val plain = factory.build(calendar, JsonObject(emptyMap()))
+        assertIs<E2eEventResult.Built>(plain)
+        assertEquals(null, assertIs<TriggerEvent.CalendarEventFired>(plain.envelope.event).title)
     }
 }

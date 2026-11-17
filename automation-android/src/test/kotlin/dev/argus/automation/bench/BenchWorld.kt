@@ -27,8 +27,10 @@ import java.time.ZoneId
  * [AndroidCapabilityProbe] (stesso codice dell'app) alimentato da uno stato Android fittizio, quindi
  * tool, trigger, capability e motivi di indisponibilita' sono quelli che l'app pubblica davvero.
  *
- * - `full`: Shizuku autorizzato, tutti i permessi, accesso notifiche, DND e impostazioni di sistema, posizione accesa; l'unico
- *   sensore armabile e' il movimento significativo, come sul telefono (e' l'unico con un backend).
+ * - `full`: Shizuku autorizzato, tutti i permessi, accesso notifiche, DND e impostazioni di sistema, posizione accesa; i
+ *   sensori armabili sono il movimento significativo e i due gesti dall'accelerometro (scossa, faccia in giu'), quelli
+ *   con un backend. Il telefono ha un segreto salvato ([SAVED_SECRETS]) e quattro modalita' ([USER_MODES]): il
+ *   compile ne riceve i nomi, come nell'app.
  * - `no_shizuku`: stesso telefono senza Shizuku installato; restano le azioni del tier base.
  * - `no_accessibility`: il telefono completo con il servizio di Accessibilita' spento: `ui_steps` e' tra
  *   gli strumenti non disponibili, col motivo che l'app pubblica davvero.
@@ -102,9 +104,17 @@ internal class BenchWorld private constructor(
             WhitelistedContact("Mamma", "bench-jid-mamma"),
             WhitelistedContact("Marco Bianchi", "bench-jid-marco"),
             WhitelistedContact("Giulia", "bench-jid-giulia"),
+            // 0.8: una chat Telegram, identificata dallo shortcut di conversazione dell'app.
+            WhitelistedContact("Luca", "shortcut:org.telegram.messenger:" + "1".repeat(64)),
         )
 
         val CONTACT_NAMES: Set<String> = CONTACTS.mapTo(LinkedHashSet()) { it.displayName }
+
+        /** 0.8: i NOMI dei segreti salvati nella cassaforte del telefono di prova (i valori non esistono qui). */
+        val SAVED_SECRETS: List<String> = listOf("ha_token")
+
+        /** 0.8: le modalita' dell'utente, una coppia per lingua dei casi. */
+        val USER_MODES: List<String> = listOf("Casa", "Lavoro", "Home", "Work")
 
         private val REPLY_LANGUAGES = setOf("it", "en")
 
@@ -173,6 +183,14 @@ internal class BenchWorld private constructor(
             nfcPresent = true,
             // 0.5.1: servizio di Accessibilita' acceso, quindi ui_steps si pubblica.
             accessibilityEnabled = true,
+            // 0.8: telefonia con SMS e chiamate concessi, Argus app di filtro chiamate, contatti leggibili.
+            telephonyPresent = true,
+            sendSmsGranted = true,
+            callPhoneGranted = true,
+            callScreeningRoleHeld = true,
+            readContactsGranted = true,
+            // 0.8: calendario leggibile, quindi calendar_event e calendar_busy si pubblicano.
+            readCalendarGranted = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(
@@ -191,6 +209,19 @@ internal class BenchWorld private constructor(
             maxDelayUs = 0,
             permissionGranted = true,
         )
+
+        /** 0.8: scossa e faccia in giu', ricavati dall'accelerometro continuo come sul telefono. */
+        private val GESTURES: List<AndroidSensorCapability> = listOf(SensorKind.SHAKE, SensorKind.FLIP_FACE_DOWN).map {
+            AndroidSensorCapability(
+                kind = it,
+                reportingMode = SensorReportingMode.CONTINUOUS,
+                wakeUp = false,
+                fifoMaxEventCount = 0,
+                minDelayUs = 0,
+                maxDelayUs = 0,
+                permissionGranted = true,
+            )
+        }
 
         private fun baseValues(battery: String): Map<String, String> = mapOf(
             "ringer" to "normal",
@@ -228,12 +259,14 @@ internal class BenchWorld private constructor(
                 readiness = GenerativeRuntimeReadiness {
                     GenerativeReadiness(bridgeConfigured = true, privacyAccepted = true)
                 },
-                sensors = AndroidSensorCapabilitySource { _ -> listOf(SIGNIFICANT_MOTION) },
+                sensors = AndroidSensorCapabilitySource { _ -> listOf(SIGNIFICANT_MOTION) + GESTURES },
                 implementedSensorKinds = AndroidCapabilityProbe.IMPLEMENTED_SENSOR_KINDS,
                 // Come ArgusModule: DND/Ringer e LaunchApp/OpenUrl senza Shizuku.
                 baseTierActive = true,
             )
-            return probe.probe(deviceState) to probe.current().availableCapabilities
+            // Come SecretRuleLinks e UserModes nell'app: i nomi entrano nel manifest del compile.
+            val manifest = probe.probe(deviceState).copy(savedSecrets = SAVED_SECRETS, userModes = USER_MODES)
+            return manifest to probe.current().availableCapabilities
         }
     }
 }

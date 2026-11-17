@@ -2,18 +2,25 @@ package dev.argus.automation
 
 import dev.argus.automation.apps.AssumeAllInstalled
 import dev.argus.automation.apps.InstalledPackageCheck
+import dev.argus.automation.nfc.NfcTagReadResult
+import dev.argus.automation.nfc.NfcTagReader
+import dev.argus.automation.nfc.NoNfcTagReader
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.SecretPolicy
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.UserModePolicy
+import dev.argus.engine.model.allActions
 import dev.argus.engine.model.stateComparisons
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -62,6 +69,11 @@ data class DeviceLocation(
     }
 }
 
+/** 0.8: i nomi delle modalità definite adesso (Room in produzione). */
+fun interface UserModeNames {
+    suspend fun names(): List<String>
+}
+
 fun interface CurrentLocationProvider {
     suspend fun current(): DeviceLocation?
 }
@@ -100,6 +112,9 @@ sealed interface FlowArmResult {
     data class ValidationFailed(val issues: List<ValidationIssue>) : FlowArmResult
     data object PolicyUnavailable : FlowArmResult
     data object LocationUnavailable : FlowArmResult
+
+    /** 0.8: la regola `nfc_tag` va letta all'attivazione e il tag non è stato letto ([reason]). */
+    data class NfcTagNotRead(val reason: NfcTagReadResult) : FlowArmResult
     data object IntegrityFailure : FlowArmResult
     data object AutomationConflict : FlowArmResult
     data class RegistrationFailed(val automation: Automation) : FlowArmResult
@@ -122,6 +137,26 @@ class ApprovalFlow(
     },
     /** 0.7.0: controllo fatto SUL TELEFONO all'approvazione: un package non installato è un avviso, mai un errore. */
     private val installedPackages: InstalledPackageCheck = AssumeAllInstalled,
+    /**
+     * 0.8: legge il tag di una regola `nfc_tag` con `resolveTag` all'attivazione, in primo piano, come la
+     * posizione «qui» di una geofence. Il default non legge nulla: la regola non si arma.
+     */
+    private val nfcTags: NfcTagReader = NoNfcTagReader,
+    /**
+     * 0.8: `true` se su questo telefono una scansione NFC si può verificare (Android 15+). Altrimenti una regola
+     * `nfc_tag` con shell o macro sullo schermo si arma con un avviso: quelle azioni non partiranno mai.
+     */
+    private val nfcScansVerifiable: () -> Boolean = { true },
+    /**
+     * 0.8: i nomi delle modalità definite adesso. Una regola che ne nomina una che non esiste non si arma
+     * (ERROR `user_mode_unknown`). Default: nessuna modalità, quindi fail-closed.
+     */
+    private val userModes: UserModeNames = UserModeNames { emptyList() },
+    /**
+     * 0.8: i nomi dei segreti salvati nella cassaforte del telefono (mai i valori). Default: nessuno, quindi
+     * una regola che nomina un segreto non si arma finché il caller non cabla la cassaforte.
+     */
+    private val savedSecrets: suspend () -> Set<String> = { emptySet() },
 ) {
     suspend fun submit(compile: CompileResult): DraftSubmissionResult {
         return persistCompile(
@@ -233,7 +268,8 @@ class ApprovalFlow(
     suspend fun review(id: DraftId): ApprovalFlowReview? {
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
-        val appIssues = missingAppIssues(base.snapshot)
+        val appIssues = missingAppIssues(base.snapshot) + systemFreezeIssues(base.snapshot) +
+            unverifiableNfcIssues(base.snapshot) + userModeIssues(base.snapshot) + missingSecretIssues(base.snapshot)
         val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
             StateQueryProbeReport()
         } else {
@@ -278,10 +314,60 @@ class ApprovalFlow(
         var snapshot = currentReview.draft.snapshot
         // Geofence «qui» e alba/tramonto (0.4.1) si risolvono allo stesso modo: la posizione del
         // telefono si legge ora, si scrive nella bozza e l'impronta approvata la include.
+        // 0.8: anche il trigger di fine di una regola-intervallo (stessa lettura: inizio e fine sulla stessa area).
         val locationTrigger = snapshot.draft.trigger
-        if (needsCurrentLocation(locationTrigger)) {
+        val exitLocationTrigger = snapshot.draft.exit?.trigger
+        if (needsCurrentLocation(locationTrigger) || exitLocationTrigger?.let(::needsCurrentLocation) == true) {
             val resolved = currentLocation() ?: return FlowArmResult.LocationUnavailable
-            val revisedDraft = snapshot.draft.copy(trigger = withCurrentLocation(locationTrigger, resolved))
+            val revisedDraft = snapshot.draft.copy(
+                trigger = if (needsCurrentLocation(locationTrigger)) {
+                    withCurrentLocation(locationTrigger, resolved)
+                } else {
+                    locationTrigger
+                },
+                exit = snapshot.draft.exit?.let { exit ->
+                    if (needsCurrentLocation(exit.trigger)) exit.copy(trigger = withCurrentLocation(exit.trigger, resolved)) else exit
+                },
+            )
+            when (
+                val revised = drafts.revise(
+                    id = snapshot.id,
+                    expectedRevision = snapshot.revision,
+                    draft = revisedDraft,
+                    priority = snapshot.priority,
+                    atMillis = nowMillis(),
+                )
+            ) {
+                is DraftWriteResult.Saved -> snapshot = revised.snapshot
+                is DraftWriteResult.Conflict -> return revised.currentRevision?.let(FlowArmResult::Stale)
+                    ?: FlowArmResult.Missing
+                is DraftWriteResult.Rejected -> return FlowArmResult.IntegrityFailure
+            }
+            currentReview = review(id) ?: return FlowArmResult.Missing
+            if (currentReview.draft.snapshot.revision != snapshot.revision ||
+                currentReview.draft.snapshot.fingerprint != snapshot.fingerprint
+            ) return FlowArmResult.IntegrityFailure
+            currentReview.validationFailure()?.let {
+                return rejectValidation(
+                    currentReview.draft.snapshot.automationId,
+                    it.issues,
+                )
+            }
+        }
+
+        // 0.8: tag NFC «da leggere all'attivazione»: stesso percorso della posizione. Il tag letto entra nella
+        // bozza e nell'impronta approvata; il modello non lo vede mai.
+        val tagTrigger = snapshot.draft.trigger
+        if (tagTrigger is Trigger.NfcTag && tagTrigger.resolveTag) {
+            val read = try {
+                nfcTags.read()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                NfcTagReadResult.Cancelled
+            }
+            val tagId = (read as? NfcTagReadResult.Read)?.tagId ?: return FlowArmResult.NfcTagNotRead(read)
+            val revisedDraft = snapshot.draft.copy(trigger = tagTrigger.copy(tagId = tagId, resolveTag = false))
             when (
                 val revised = drafts.revise(
                     id = snapshot.id,
@@ -342,12 +428,7 @@ class ApprovalFlow(
         }
         // Anche i lettori delle variabili P4: senza, una regola che legge lo stato con un lettore non
         // disponibile si armava e poi veniva bloccata a ogni scatto (trovato dalla suite e2e 0.6.0).
-        val required = CapabilityRequirements.derive(
-            snapshot.draft.trigger,
-            snapshot.draft.actions,
-            snapshot.draft.conditions,
-            snapshot.draft.vars,
-        )
+        val required = CapabilityRequirements.derive(snapshot.draft)
         val missing = required - policy.availableCapabilities
         return missing.sorted().map { capability ->
             if (capability in policy.transientlyUnavailableCapabilities) {
@@ -392,6 +473,129 @@ class ApprovalFlow(
         }
     }
 
+    /**
+     * 0.8: prima di Android 15 una scansione NFC non si può verificare (vedi `NfcScanVerification`), quindi una
+     * regola `nfc_tag` non avvierà mai shell né macro sullo schermo: lo si dice prima dell'attivazione, come
+     * WARNING `nfc_scan_unverifiable`. Le altre azioni partono normalmente.
+     */
+    private fun unverifiableNfcIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        // 0.8: un tag che chiude una regola-intervallo vale per le azioni di fine.
+        val draft = snapshot.draft
+        val startGated = draft.trigger is Trigger.NfcTag && draft.actions.any { it.containsShellOrMacro() }
+        val endGated = draft.exit?.let { exit ->
+            exit.trigger is Trigger.NfcTag && exit.actions.any { it.containsShellOrMacro() }
+        } == true
+        val gated = startGated || endGated
+        if (!gated) return emptyList()
+        if (runCatching(nfcScansVerifiable).getOrDefault(false)) {
+            // Android 15+: la prova c'è solo se il servizio NFC condivide la sua identità con l'activity
+            // (`ComponentCaller.getUid`); se non lo fa la scansione resta non verificata. Lo si dice.
+            return listOf(
+                ValidationIssue(
+                    Severity.WARNING,
+                    "nfc_scan_verified_only",
+                    "Shell e macro partono solo se il telefono prova che la lettura viene dal suo servizio NFC",
+                ),
+            )
+        }
+        return listOf(
+            ValidationIssue(
+                Severity.WARNING,
+                "nfc_scan_unverifiable",
+                "Su questo telefono una scansione NFC non si verifica: shell e macro non partiranno",
+            ),
+        )
+    }
+
+    private fun Action.containsShellOrMacro(): Boolean = when (this) {
+        is Action.RunShell, is Action.UiSteps -> true
+        is Action.If -> then.any { it.containsShellOrMacro() } || orElse.any { it.containsShellOrMacro() }
+        is Action.While -> body.any { it.containsShellOrMacro() }
+        else -> false
+    }
+
+    /**
+     * 0.8: una regola che nomina un segreto non salvato non può funzionare: ERROR `secret_missing` col nome
+     * in `detail`, uno per nome, quindi non si arma. Se la cassaforte non si legge, fallisce chiusa: ogni
+     * nome è dato per mancante.
+     */
+    private suspend fun missingSecretIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val used = SecretPolicy.namesUsedBy(snapshot.draft)
+        if (used.isEmpty()) return emptyList()
+        val saved = try {
+            savedSecrets()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptySet()
+        }
+        return used.filter { it !in saved }.map { name ->
+            ValidationIssue(
+                Severity.ERROR,
+                "secret_missing",
+                "Segreto non salvato su questo telefono: $name",
+                detail = name,
+            )
+        }
+    }
+
+    /**
+     * 0.7.2: congelare un'app di sistema (preinstallata) può togliere al telefono qualcosa che gli serve, ma
+     * è anche il modo legittimo di spegnere le app superflue del produttore: WARNING
+     * `app_control_freeze_system` con il package in `detail`, uno per package, mai un blocco. Se il
+     * controllo fallisce non si avvisa.
+     */
+    private suspend fun systemFreezeIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val frozen = AppPackages.slotsByAction(snapshot.draft.trigger, snapshot.draft.actions).entries
+            .sortedBy { it.value }
+            .mapNotNull { (action, _) -> (action as? Action.AppControl)?.takeIf { it.op == AppControlOp.FREEZE }?.pkg }
+            .distinct()
+        if (frozen.isEmpty()) return emptyList()
+        val system = try {
+            installedPackages.systemApps(frozen)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return frozen.filter { it in system }.map { pkg ->
+            ValidationIssue(
+                Severity.WARNING,
+                "app_control_freeze_system",
+                "La regola congela un'app di sistema: $pkg",
+                detail = pkg,
+            )
+        }
+    }
+
+    /**
+     * 0.8: ogni modalità nominata dalla regola (trigger, condizioni, `set_user_mode`) deve esistere adesso,
+     * senza maiuscole. Una per nome mancante, con il nome in `detail`. Se l'elenco non si legge: ERROR anche lì.
+     */
+    private suspend fun userModeIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val used = UserModePolicy.modesUsedBy(snapshot.draft)
+        if (used.isEmpty()) return emptyList()
+        val existing = try {
+            userModes.names()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return listOf(
+                ValidationIssue(Severity.ERROR, "user_mode_unavailable", "Impossibile leggere l'elenco delle modalità"),
+            )
+        }
+        return used.filter { name -> existing.none { UserModePolicy.same(it, name) } }
+            .distinctBy(UserModePolicy::key)
+            .map { name ->
+                ValidationIssue(
+                    Severity.ERROR,
+                    "user_mode_unknown",
+                    "Modalità inesistente: $name",
+                    detail = name,
+                )
+            }
+    }
+
     private suspend fun stateQueryReport(snapshot: PendingDraft): StateQueryProbeReport {
         val issues = mutableListOf<ValidationIssue>()
         val verified = mutableListOf<StateQueryProbeEvidence>()
@@ -399,7 +603,8 @@ class ApprovalFlow(
             snapshot.draft.conditions?.stateComparisons().orEmpty().forEach { condition ->
                 add(StateQueryProbeRequest(condition.query, condition.valueType))
             }
-            snapshot.draft.actions.filterIsInstance<Action.InvokeLlmV2>().forEach { action ->
+            // 0.8: anche le azioni di fine di una regola-intervallo.
+            snapshot.draft.allActions.filterIsInstance<Action.InvokeLlmV2>().forEach { action ->
                 action.stateContext.forEach { context ->
                     add(StateQueryProbeRequest(context.query, context.valueType))
                 }

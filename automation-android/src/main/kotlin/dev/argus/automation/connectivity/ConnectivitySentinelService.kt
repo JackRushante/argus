@@ -27,6 +27,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.R
+import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.triggers.AndroidDeviceEventSources
 import dev.argus.automation.triggers.DeviceEventDemand
 import dev.argus.automation.triggers.DeviceEventIngress
@@ -48,6 +49,7 @@ internal interface ConnectivitySentinelEntryPoint {
     fun connectivitySentinelStatus(): ConnectivitySentinelStatus
     fun deviceEventIngress(): DeviceEventIngress
     fun deviceEventDemand(): DeviceEventDemand
+    fun sharedForegroundSentinel(): SharedForegroundSentinel
 }
 
 /**
@@ -73,6 +75,7 @@ class ConnectivitySentinelService : Service() {
     private var monitorMarker: ConnectivityMonitorMarker? = null
     private var deviceDemandJob: Job? = null
     private var lastWifiName: String? = null
+    private val wifiReference = WifiInitialReference()
     private var startupFailed = false
 
     /**
@@ -116,6 +119,17 @@ class ConnectivitySentinelService : Service() {
             status.setActive(true)
             monitorMarker.setActive(true)
             Log.i(TAG, "sentinella attiva")
+            // Ricreato da START_STICKY dopo la morte del processo senza più nessuna domanda: si ferma.
+            val sentinel = entry.sharedForegroundSentinel()
+            scope.launch {
+                try {
+                    sentinel.onServiceActive()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "controllo servizio orfano fallito: ${error::class.java.simpleName}")
+                }
+            }
         } catch (error: SecurityException) {
             failStartup(error)
         } catch (error: RuntimeException) {
@@ -147,6 +161,7 @@ class ConnectivitySentinelService : Service() {
             scope,
             recoverMissed,
             appPackages = { demand.appPackages.value },
+            appUsageWatches = { demand.appUsage.value },
         )
         deviceSources = sources
         deviceDemandJob = scope.launch {
@@ -347,11 +362,7 @@ class ConnectivitySentinelService : Service() {
     private fun ssidOf(network: Network): String? =
         connectivityManager.getNetworkCapabilities(network)?.let(::ssidFrom)
 
-    private fun ssidFrom(capabilities: NetworkCapabilities): String? =
-        (capabilities.transportInfo as? WifiInfo)?.ssid
-            ?.removeSurrounding("\"")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() && it != WifiManager.UNKNOWN_SSID }
+    private fun ssidFrom(capabilities: NetworkCapabilities): String? = wifiSsidFrom(capabilities)
 
     private fun observeWifi(state: ConnState, name: String?, initial: Boolean) {
         dispatchObservation(
@@ -359,7 +370,7 @@ class ConnectivitySentinelService : Service() {
             state = state,
             name = name,
             sourceIdentity = WIFI_SOURCE_ID,
-            initial = initial,
+            initial = wifiReference.classify(state, name, initial, recoverMissed),
         )
     }
 
@@ -420,6 +431,44 @@ class ConnectivitySentinelService : Service() {
         const val POWER_SOURCE_ID = "device-power"
     }
 }
+
+/**
+ * Prima osservazione Wi-Fi di un monitor appena acceso (B4). Da Android 12 lo snapshot iniziale
+ * non porta l'SSID (le capability lette senza `FLAG_INCLUDE_LOCATION_INFO` sono redatte): il nome
+ * arriva poco dopo dalla prima callback. Quella callback completa il RIFERIMENTO iniziale e non è
+ * una transizione: altrimenti armare «quando mi collego a Casa» stando già a casa scatterebbe
+ * subito. Restituisce il flag `initial` da passare all'ingress.
+ */
+internal class WifiInitialReference {
+    private var awaitingName = false
+
+    @Synchronized
+    fun classify(state: ConnState, name: String?, initial: Boolean, recoverMissed: Boolean): Boolean {
+        if (initial) {
+            // Con un monitor già attivo in continuo la prima osservazione è un recupero, non un
+            // riferimento: allora il nome tardivo resta un arricchimento come prima.
+            awaitingName = !recoverMissed && state == ConnState.CONNECTED && name == null
+            return true
+        }
+        if (!awaitingName) return false
+        if (state == ConnState.DISCONNECTED) {
+            awaitingName = false
+            return false
+        }
+        if (name != null) awaitingName = false
+        return true
+    }
+}
+
+/**
+ * Il nome della rete Wi-Fi da capability lette con `FLAG_INCLUDE_LOCATION_INFO`; null se redatto o ignoto.
+ * Lo usano la sentinella del trigger e la condizione `wifi_connected`.
+ */
+internal fun wifiSsidFrom(capabilities: NetworkCapabilities): String? =
+    (capabilities.transportInfo as? WifiInfo)?.ssid
+        ?.removeSurrounding("\"")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it != WifiManager.UNKNOWN_SSID }
 
 /** Uno sticky snapshot assente/incompleto è ignoto: non va inventato come DISCONNECTED. */
 internal fun powerConnectionState(battery: Intent?): ConnState? {

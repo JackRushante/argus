@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -68,6 +69,7 @@ import dev.argus.ui.theme.ArgusTheme
  * @param titleSuffix elementi dopo il titolo sulla stessa riga (es. il triangolo «Ha avvisi»).
  * @param titleColor `onSurface` di default; `onSurfaceVariant` per le righe «rumore utile» (mai trasparenza).
  * @param subtitleColor `onSurfaceVariant` di default; per un esito colorato usare il `fg` del ruolo.
+ * @param titleStyle `titleSmall` di default; `ArgusCode` per un identificatore (il nome di un segreto).
  * @param trailingAtTop `true` = [trailing] in alto, a 6 dp dal bordo (tavola «Automazioni»: l'interruttore,
  *   alto 48 dp con l'area tattile, ha il tratto visibile a 14 dp e sta sulla riga del titolo); `false` = centrato.
  */
@@ -86,6 +88,7 @@ fun ArgusListRow(
     subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     contentPadding: PaddingValues = PaddingValues(ArgusSpacing.Medium),
     trailingAtTop: Boolean = false,
+    titleStyle: TextStyle = MaterialTheme.typography.titleSmall,
 ) {
     Row(
         modifier = modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp),
@@ -109,7 +112,7 @@ fun ArgusListRow(
                         title,
                         modifier = Modifier.weight(1f, fill = false),
                         color = titleColor,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = titleStyle,
                     )
                     if (titleSuffix != null) titleSuffix()
                 }

@@ -72,6 +72,145 @@ class ConnectivityEventIngressTest {
         assertEquals("Auto", (events[1].event as TriggerEvent.ConnectivityChanged).name)
     }
 
+    // --- B4 (0.7.2): un'altra rete con nome è una transizione, non un arricchimento ------------
+
+    @Test
+    fun `a different wifi name at unchanged state is a disconnect then a connect with fresh ids`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val events = mutableListOf<TriggerEnvelope>()
+        val ingress = ingress(store, events)
+
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Casa", "device-wifi", 100)
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Ufficio", "device-wifi", 500)
+
+        assertEquals(
+            listOf(
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.CONNECTED, "Casa"),
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.DISCONNECTED, "Casa"),
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.CONNECTED, "Ufficio"),
+            ),
+            events.map { it.event },
+        )
+        assertEquals(3, events.map { it.id }.toSet().size, "id freschi, niente deduplica")
+        assertTrue(store.pending().isEmpty())
+
+        // Tornare a «Casa» è di nuovo una transizione vera, con un id diverso dal primo.
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Casa", "device-wifi", 900)
+        assertEquals(5, events.size)
+        assertEquals(5, events.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun `a renamed bluetooth device keeps its transition identity`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val events = mutableListOf<TriggerEnvelope>()
+        val ingress = ingress(store, events)
+
+        ingress.observe(ConnMedium.BT, ConnState.CONNECTED, "Auto", "AA:BB", 100)
+        ingress.observe(ConnMedium.BT, ConnState.CONNECTED, "Auto di Lia", "AA:BB", 500)
+
+        assertEquals(listOf(ConnState.CONNECTED, ConnState.CONNECTED), events.map {
+            (it.event as TriggerEvent.ConnectivityChanged).state
+        })
+        assertEquals(events[0].id, events[1].id)
+    }
+
+    @Test
+    fun `a failed disconnect of the old network stays pending and the new network follows`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val delivered = mutableListOf<TriggerEvent.ConnectivityChanged>()
+        var failDisconnect = true
+        val ingress = ConnectivityEventIngress(ConnectivityEventParser(), store) { envelope ->
+            val event = envelope.event as TriggerEvent.ConnectivityChanged
+            if (event.state == ConnState.DISCONNECTED && failDisconnect) error("process dies")
+            delivered += event
+        }
+
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Casa", "device-wifi", 100)
+        assertFailsWith<IllegalStateException> {
+            ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Ufficio", "device-wifi", 500)
+        }
+        assertEquals(ConnState.DISCONNECTED, store.pending().single().second.event.let {
+            (it as TriggerEvent.ConnectivityChanged).state
+        })
+
+        failDisconnect = false
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Ufficio", "device-wifi", 600)
+
+        assertEquals(
+            listOf(
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.CONNECTED, "Casa"),
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.DISCONNECTED, "Casa"),
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.CONNECTED, "Ufficio"),
+            ),
+            delivered,
+        )
+        assertTrue(store.pending().isEmpty())
+    }
+
+    @Test
+    fun `a network change while the monitor was off only moves the reference`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val events = mutableListOf<TriggerEnvelope>()
+        val ingress = ingress(store, events)
+
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Casa", "device-wifi", 100, initial = true)
+        ingress.observe(ConnMedium.WIFI, ConnState.CONNECTED, "Ufficio", "device-wifi", 500, initial = true)
+        assertTrue(events.isEmpty())
+
+        ingress.observe(ConnMedium.WIFI, ConnState.DISCONNECTED, null, "device-wifi", 900)
+        assertEquals(
+            TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.DISCONNECTED, "Ufficio"),
+            events.single().event,
+        )
+    }
+
+    @Test
+    fun `android 12 late ssid after an anonymous initial snapshot does not fire a connect rule`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val events = mutableListOf<TriggerEnvelope>()
+        val ingress = ingress(store, events)
+        val reference = WifiInitialReference()
+
+        suspend fun observe(state: ConnState, name: String?, at: Long, initial: Boolean = false) =
+            ingress.observe(
+                ConnMedium.WIFI, state, name, "device-wifi", at,
+                initial = reference.classify(state, name, initial, recoverMissed = false),
+            )
+
+        // Già a casa: lo snapshot iniziale è anonimo, il nome arriva dalla prima callback.
+        observe(ConnState.CONNECTED, null, 100, initial = true)
+        observe(ConnState.CONNECTED, "Casa", 110)
+        assertTrue(events.isEmpty())
+
+        // Le transizioni successive sono vere.
+        observe(ConnState.DISCONNECTED, null, 200)
+        observe(ConnState.CONNECTED, "Casa", 300)
+        assertEquals(
+            listOf(
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.DISCONNECTED, "Casa"),
+                TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.CONNECTED, "Casa"),
+            ),
+            events.map { it.event },
+        )
+    }
+
+    @Test
+    fun `the initial wifi reference stops waiting for a name after a disconnect or with recovery`() {
+        val reference = WifiInitialReference()
+        assertTrue(reference.classify(ConnState.CONNECTED, null, initial = true, recoverMissed = false))
+        assertEquals(false, reference.classify(ConnState.DISCONNECTED, null, initial = false, recoverMissed = false))
+        assertEquals(false, reference.classify(ConnState.CONNECTED, "Casa", initial = false, recoverMissed = false))
+
+        val recovering = WifiInitialReference()
+        assertTrue(recovering.classify(ConnState.CONNECTED, null, initial = true, recoverMissed = true))
+        assertEquals(false, recovering.classify(ConnState.CONNECTED, "Casa", initial = false, recoverMissed = true))
+
+        val named = WifiInitialReference()
+        assertTrue(named.classify(ConnState.CONNECTED, "Casa", initial = true, recoverMissed = false))
+        assertEquals(false, named.classify(ConnState.CONNECTED, "Ufficio", initial = false, recoverMissed = false))
+    }
+
     @Test
     fun `different bluetooth devices keep independent transition state`() = runTest {
         val store = MemoryConnectivityStateStore()

@@ -20,6 +20,17 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- Connectivity BT (API 31+): grant runtime opt-in, separato da Wi-Fi/alimentazione. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 0.8: SMS e chiamate in uscita, contatti per il filtro chiamate «solo sconosciuti». Runtime grant
+         richiesti SOLO quando una regola li usa (righe opt-in in Sistema). -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- I permessi di telefonia la rendono implicitamente obbligatoria: Argus funziona anche senza
+         (SMS, chiamate e filtro chiamate risultano non disponibili). -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <!-- 0.8, calendario (condizione calendar_busy e trigger calendar_event): grant runtime opt-in,
+         chiesto solo per le regole che leggono il calendario. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- Tier base senza Shizuku (P3-3): DND/Ringer via NotificationManager/AudioManager.
          Grant «Accesso Non disturbare» concesso dall'utente, non runtime. -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
@@ -138,8 +149,28 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- 0.8: pulsanti di «chiedimi prima» e delle domande, sveglia di scadenza. Non esportato e senza
+             intent-filter: lo raggiungono solo i PendingIntent immutabili ed espliciti di Argus, con il
+             token casuale della domanda. -->
+        <receiver
+            android:name="dev.argus.automation.prompt.UserPromptReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- 0.7.2: sveglia inexact del backup automatico delle regole; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.backup.AutoBackupAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver
             android:name="dev.argus.automation.geofence.GeofenceTransitionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- 0.8: ricontrollo di una geofence DWELL dopo la sua attesa; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.geofence.GeofenceDwellReceiver"
             android:enabled="true"
             android:exported="false" />
 
@@ -153,6 +184,51 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <!-- 0.8: la prossima sveglia è cambiata (trigger next_alarm). Broadcast di sistema esente dai
+                     limiti sugli implicit receiver; senza regole next_alarm il reconcile non cambia nulla. -->
+                <action android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 0.8, rules active before the first unlock (opt-in per rule). The ONLY direct-boot-aware components of
+             Argus, in their own process: there ArgusApplication skips its whole start-up (no Hilt graph, Room,
+             preferences, Keystore or Shizuku), and they read only device-encrypted storage. Not exported: the boot
+             broadcast comes from the system (a protected broadcast), the alarm from Argus's own explicit, immutable
+             PendingIntent; both receivers check the action anyway. -->
+        <receiver
+            android:name="dev.argus.automation.directboot.LockedBootReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":locked">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="dev.argus.automation.directboot.LockedAlarmReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":locked" />
+
+        <!-- 0.8: sveglia per regola del trigger calendario; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.calendar.CalendarAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- 0.8: ripianifica le istanze del calendario dopo riavvio, cambio di ora o di fuso, aggiornamento. -->
+        <receiver
+            android:name="dev.argus.automation.calendar.CalendarReplanReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
@@ -176,6 +252,17 @@
                 <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
+
+        <!-- 0.8: filtro chiamate (`screen_call`). Android lo usa solo se Argus ha il ruolo «filtro
+             chiamate», chiesto quando una regola lo usa; BIND_SCREENING_SERVICE: solo il sistema si lega. -->
+        <service
+            android:name="dev.argus.automation.telephony.ArgusCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
 
         <!-- ACL_CONNECTED/DISCONNECTED sono broadcast protetti di sistema ed esenti dai
              limiti sugli implicit receiver. Nessun receiver manifest per POWER: non è esente. -->

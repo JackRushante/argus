@@ -22,6 +22,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
@@ -368,7 +369,7 @@ class CliBridgeTransport internal constructor(
             }
             val notification = context.event as? TriggerEvent.NotificationPosted
                 ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
-            if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+            if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
                 throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
             }
             val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
@@ -385,7 +386,7 @@ class CliBridgeTransport internal constructor(
             )
         } else {
             // Sink NOTIFICA #59 (da timer/immediate): NESSUNA notifica (né in sorgenti né come evento,
-            // niente requireWhatsAppNotification). contextSources = [] oppure il solo [state]. La
+            // niente requireReplyNotification). contextSources = [] oppure il solo [state]. La
             // notifica è OMESSA dall'envelope; lo stato viaggia solo se "state" è fra le sorgenti.
             if (contextSources != contextSources.distinct() ||
                 contextSources.any { it !in SINK_CONTEXT_SOURCES }
@@ -451,7 +452,7 @@ class CliBridgeTransport internal constructor(
             }
             val notification = context.event as? TriggerEvent.NotificationPosted
                 ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
-            if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+            if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
                 throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
             }
             val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
@@ -530,7 +531,7 @@ class CliBridgeTransport internal constructor(
         }
         val notification = context.event as? TriggerEvent.NotificationPosted
             ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act v2 richiede un evento Notification")
-        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+        if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act v2 non autorizzata")
         }
         val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
@@ -770,10 +771,12 @@ class CliBridgeTransport internal constructor(
         availableTools = availableTools,
         unavailableTools = unavailableTools,
         whitelistedContacts = whitelistedContacts.mapIndexed { index, contact ->
-            ContactEnvelope(alias = ContactAliasMapper.aliasFor(index), displayName = contact.displayName)
+            ContactEnvelope(alias = ContactAliasMapper.aliasFor(index), displayName = ContactAliasMapper.modelDisplayName(contact))
         },
         stateKeys = stateKeys,
-        availableTriggers = availableTriggers,
+        // Il bridge v2 rifiuta l'intero manifest se un trigger non è nel suo elenco chiuso: si offrono
+        // solo quelli, nel suo ordine canonico. Gli altri (manual, screen, 0.8…) non passano dal bridge.
+        availableTriggers = BRIDGE_COMPILE_TRIGGERS.filter { it in availableTriggers },
         stateReaders = StateReadersEnvelope(
             policyVersion = stateReaders.policyVersion,
             families = stateReaders.families.map { it.wireName },
@@ -859,6 +862,32 @@ class CliBridgeTransport internal constructor(
 
     companion object {
         const val COMPILE_SCHEMA_VERSION = 2
+
+        /**
+         * I trigger che il bridge Hermes conosce per il compile, nel suo ordine canonico
+         * (`AVAILABLE_TRIGGER_IDS` in `ops/hermes/bridge.py`; i due elenchi li tiene allineati il contratto
+         * condiviso `contracts/hermes-compile-v2-manifest.json`). Un bridge già installato rifiuta con
+         * `invalid_manifest` un manifest che ne nomina altri, quindi il telefono offre al bridge solo questi:
+         * i trigger più nuovi si compilano con un provider diretto.
+         */
+        internal val BRIDGE_COMPILE_TRIGGERS: List<String> = listOf(
+            "time",
+            "immediate",
+            "notification",
+            "geofence",
+            "phone_state.sms",
+            "phone_state.call",
+            "connectivity.wifi",
+            "connectivity.wifi.identity",
+            "connectivity.bt",
+            "connectivity.power",
+            "sensor.significant_motion",
+            "sensor.stationary_detect",
+            "sensor.motion_detect",
+            "sensor.step_detector",
+            "sensor.step_counter",
+        )
+
         const val ACT_SCHEMA_VERSION = 1
         const val ACT_V2_SCHEMA_VERSION = 2
 
@@ -907,7 +936,6 @@ class CliBridgeTransport internal constructor(
         /** Sink NOTIFICA #59: sorgenti ammesse senza reply — solo "state" (opzionale), MAI
          *  "notification". Lista vuota valida (testo dal solo goal). */
         private val SINK_CONTEXT_SOURCES = setOf("state")
-        private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 
         // 125s > timeout azione massimo (120s, MAX_ACT_TIMEOUT_MILLIS): l'HTTP non deve tagliare
         // prima che scada il withTimeout della lane generativa, altrimenti una /act web lenta

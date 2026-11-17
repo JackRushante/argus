@@ -39,6 +39,17 @@ object StaticShellSafety {
         // 0.5.1: qualunque app può aprirne un'altra (un link, un'intent, uno schermo bloccato), quindi
         // «app aperta/chiusa» non è un'identità fidata e non può avviare la shell.
         is Trigger.AppEvent -> false
+        // 0.8: un tag NFC richiede la presenza fisica col telefono in mano.
+        is Trigger.NfcTag -> true
+        // 0.8: la prossima sveglia la può impostare qualunque app (SET_ALARM è un permesso normale):
+        // non è un'identità fidata.
+        is Trigger.NextAlarm -> false
+        // 0.8: un evento di calendario può arrivare da un invito altrui.
+        is Trigger.CalendarEvent -> false
+        // 0.8: il tempo d'uso di un'app lo può far crescere chiunque la apra (link, intent).
+        is Trigger.AppUsage -> false
+        // 0.8: la modalità può cambiarla una regola scattata da un evento esterno.
+        is Trigger.UserModeChanged -> false
         is Trigger.Notification -> verifiedContact(
             pkg = trigger.pkg,
             conversationId = trigger.conversationId,
@@ -63,6 +74,13 @@ object StaticShellSafety {
         -> true
         is TriggerEvent.MediaPlaybackChanged -> false
         is TriggerEvent.AppForegroundChanged -> false
+        // 0.8: stesse decisioni dei trigger corrispondenti (vedi sopra). Il tag solo se la scansione viene
+        // provatamente dal servizio NFC: l'activity dei tag è esportata e un'app può forgiarne una.
+        is TriggerEvent.NfcTagScanned -> event.verified
+        is TriggerEvent.NextAlarmFired -> false
+        is TriggerEvent.CalendarEventFired -> false
+        is TriggerEvent.AppUsageChanged -> false
+        is TriggerEvent.UserModeChanged -> false
         is TriggerEvent.NotificationPosted -> verifiedContact(
             pkg = event.pkg,
             conversationId = event.conversationId,
@@ -103,6 +121,9 @@ object StaticShellSafety {
             trigger is Trigger.AudioOutput && event is TriggerEvent.AudioOutputChanged ->
                 TriggerMatcher().matches(trigger, event)
             trigger is Trigger.ModeChanged && event is TriggerEvent.DeviceModeChanged ->
+                TriggerMatcher().matches(trigger, event)
+            // 0.8: il tag letto deve essere quello approvato; la sveglia è programmata per regola.
+            trigger is Trigger.NfcTag && event is TriggerEvent.NfcTagScanned ->
                 TriggerMatcher().matches(trigger, event)
             trigger is Trigger.Notification && event is TriggerEvent.NotificationPosted ->
                 trigger.pkg == event.pkg &&

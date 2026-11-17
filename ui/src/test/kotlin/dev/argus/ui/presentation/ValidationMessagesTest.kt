@@ -81,7 +81,7 @@ class ValidationMessagesTest {
         assertEquals(
             setOf(
                 "conflict_wifi", "conflict_bluetooth", "conflict_mobile_data", "conflict_dnd",
-                "conflict_ringer", "conflict_dark_mode",
+                "conflict_ringer", "conflict_dark_mode", "conflict_user_mode",
             ),
             conflictCodes,
         )

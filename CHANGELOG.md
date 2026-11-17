@@ -2,6 +2,207 @@
 
 Release and engineering notes, newest first.
 
+## v0.8.0 (2026-11-17) — Spans, secrets, SMS and calls, new triggers, dry run; the fixes of a full audit
+
+This release closes the findings of a full code audit of 0.7.1 (prepared as 0.7.2, never released on its
+own) and adds the features listed under "Added". Some approved rules behave differently afterwards; those
+cases are listed under "Changed".
+
+### Security and privacy
+
+- Text read from the phone by a state reader (`setting`, `system_property`, `sysfs`, `dumpsys_field`:
+  network names, media titles, device names) is now external data, like the text of a message. In a
+  shell command it is quoted as one argument; before, it was inserted as written. Built-in states,
+  numbers and booleans stay trusted, and numbers are inserted in canonical form.
+- Quoting is no longer trusted where it cannot protect. External data is refused (an error at approval,
+  a block at run time) when it would be the name of the command, or an argument of a command that reads
+  its arguments again as code: `sh -c`, `su`, `eval`, `source`, `xargs`, `awk`, `sed`, `find -exec` and
+  the like, also behind `env`, `nohup`, `timeout`, `busybox` or a pipe.
+- Where the shell evaluates a number (`[ … -gt … ]`, `test`, `[[ ]]`, `(( ))`, `let`, integer
+  variables, array indexes) external data must be a whole number when the rule runs, or the action is
+  blocked: the Android shell evaluates those operands as expressions even when they are quoted. The same
+  holds for external data saved in a shell variable and read back without quotes.
+- New warning at approval when external data could be read as an option of the command (no `--` before it).
+- `write_setting`: the setting name must be written literally. More settings get the "security setting"
+  warning (notification listeners, autofill and credential services, assistant, proxy, private DNS,
+  mock location).
+- `open_url`: an address with a name before `@` is rejected, and external data can no longer move a
+  link away from the site written in the rule.
+- Screen macros stay on their app: every tap, typed text and scroll checks that the app of the macro is
+  still in front, and stops otherwise. They also refuse the system interface (USB-debugging and
+  screen-capture dialogs), Shizuku, root managers, the Play Store, VPN and certificate dialogs and
+  vendor security apps.
+- Freeze and force stop refuse the shell, the settings storage, permission controllers, WebView,
+  KernelSU Next, every installed launcher and the current keyboard; if the phone cannot tell which apps
+  to protect, the action is refused. Approval warns when a rule freezes a preinstalled app.
+- Changing the address of an AI server removes the saved key unless you enter a new one; the provider
+  sheet says so before saving and has a "Remove key" action.
+- Editing a rule in the chat no longer sends HTTP header values and secret variables to the AI.
+- Exports "without personal data" also remove secret values, Wi-Fi and Bluetooth names and notification
+  titles; the removed sender, chat and number must be filled in again before the imported rule can be
+  armed (before, the rule matched everyone).
+- More header names are masked at approval (cookie, session, signature, credentials). A root command
+  that times out no longer leaves child processes running, and a revoked Shizuku permission stops
+  commands at once.
+- Self-hosted bridge: bounded connections and output, child processes killed as a group, malformed
+  requests answered with a closed error.
+
+### Added
+
+- Spans, "while … then put it back" (`exit` on a rule): the rule starts on its trigger and ends on a
+  second one ("when I connect to the car, media volume to maximum; when I disconnect, put it back"). At the
+  start Argus records each value it is about to change (volume per stream, ringer, Do Not Disturb,
+  brightness, rotation, Wi-Fi, Bluetooth, mobile data, airplane mode, location, NFC, battery saver, dark
+  mode, flashlight, a written setting, the mode); at the end it puts them back in reverse order, then runs
+  the end actions. A value you changed by hand in the meantime is restored too, and approval says so.
+  Disabling, deleting or editing a rule in progress restores first. Approval shows the span as one rule.
+- Ask before running (`confirm`): when the rule fires, a notification asks "Run" or "Cancel"; no answer
+  within the time set (30 seconds to 60 minutes, 5 by default) means it does not run. A pending question
+  survives a restart within its time. On a span it applies to the start only.
+- Questions with buttons (`ask`): 2 to 4 answers, the one you tap goes into a variable the rule can test;
+  without an answer the default one, or the program stops. A program waiting for an answer resumes after
+  the app is killed. Not allowed among the end actions of a span.
+- Constrained AI answers (`invoke_llm.output`): one of 2 to 8 labels, a whole number between two limits,
+  or yes/no. Anything else is retried once and then stops the run (`llm_output_invalid`); free text is
+  never coerced. The answer is a trusted value for `if`, and approval lists the allowed answers.
+- Values kept between runs and modes: `set_stored` (set, increment, toggle, clear), the `stored` variable
+  and the `stored_compare` condition; your own modes (at most 12, one active) with `set_user_mode`,
+  `user_mode_is` and the `user_mode_changed` trigger, which never starts shell or screen macros. New
+  screen System → Modes and variables, a Quick Settings tile "Argus: mode" and mode buttons on the widget.
+  Renaming or deleting a mode that rules use sends them to review.
+- Secrets vault, System → Secrets: tokens and passwords that HTTP requests use by name
+  (`secretHeaders`, `secretQuery`). Stored encrypted, write-only (replace or delete, never shown again),
+  sent only to the approved host of the request; the AI gets their names only. Deleting one sends the
+  rules that use it to review.
+- HTTP requests: the response, or one field of a JSON response (`extract`, a JSON pointer), goes into a
+  variable (`captureAs`, at most 4,096 characters; external data). Plain `http://` is allowed towards your
+  own network, with a warning at approval; never with a secret, except towards this phone.
+- SMS and calls: `send_sms` (a fixed number, or the number that just called or wrote), `call_number`
+  (`+` and digits only, no USSD or forwarding codes), with hard caps of 10 SMS an hour, 3 an hour to the
+  same number and 3 calls an hour, saved before sending; approval warns that they may cost money.
+  `send_intent` (broadcast, activity or a service through Shizuku), every field shown at approval; it
+  refuses Argus itself, calls, installs, uninstalls and resets, and `file:`, `javascript:` and `intent:`
+  data. `screen_call` rejects or silences incoming calls through Android's call screening, optionally only
+  from numbers not in your contacts; on any doubt or delay the call rings.
+- Replies on Telegram, Signal and Google Messages (`notification_reply`, also written by the AI), with the
+  same rules as WhatsApp: 1:1 chats you whitelisted, recipient = who wrote. `notification_action`
+  dismisses, snoozes or presses a button of the notification that fired the rule. The self-hosted bridge
+  accepts AI replies for these apps.
+- Triggers: start or end of a calendar event (`calendar_event`, with an offset of up to two hours and
+  title or calendar filters), an NFC tag (`nfc_tag`, read when you arm the rule), minutes before the next
+  alarm (`next_alarm`), daily time in an app (`app_usage`), shaking the phone or laying it face down
+  (`sensor` `shake` and `flip_face_down`), staying in a place for 1 to 120 minutes (geofence `DWELL`).
+- Conditions: day of the week, connected to Wi-Fi (any or a named network), a Bluetooth device
+  connected, headphones connected, a calendar event in progress.
+- Dry run, from the rule's detail: simulates one run on a sample event you edit and shows step by step
+  what would happen, with the final shell command, URL and body and the external parts marked. Nothing is
+  executed, nothing goes to the Log, the cooldown is not used; secrets appear by name.
+- Rules before the first unlock (opt-in, "Also active before unlock" on the rule's detail): after a
+  restart a qualifying rule runs before you unlock the phone, from a copy kept with weaker protection.
+- Automatic encrypted backup of the rules to a folder you choose, daily or weekly, keeping the last 7
+  files (AES-256-GCM, key derived from your passphrase with PBKDF2, 600,000 rounds). Encrypted files are
+  imported with their passphrase.
+- Share a rule as text, as a file or as a QR code, with personal data removed by default; import from
+  pasted text or from another app; a gallery of 12 ready-made templates. Every imported rule is a draft to
+  approve. When an edit replaces an approved rule, approval shows what changes. The QR code is drawn
+  with the encoder of ZXing core (Apache-2.0, the only new library; licence in `docs/third-party/zxing/`).
+- Labels (up to 5 per rule), search on the Automations screen and pause of a whole label group.
+- Health alerts: a notification when a rule fails three times in a row or loses something it needs
+  (Shizuku, notification access, Accessibility, exact alarms, location); a switch in System. Argus asks
+  Android to reconnect the notification listener when it drops.
+- Dictation in the chat through the phone's speech recognizer (Argus does not ask for the microphone).
+- A global limit of 200 AI calls a day until you set your own limits.
+- Continuous integration on GitHub Actions (unit tests, lint, the Python tests) and Dependabot.
+
+### Fixed
+
+- Compiling through the self-hosted Hermes bridge failed with `invalid_manifest` on every request since
+  0.4.1: the phone announced triggers the bridge does not know ("manual" always), and the bridge rejected
+  the whole request. The phone now offers the bridge only the triggers of its contract, so bridges
+  already installed work again; an updated bridge also drops unknown triggers instead of refusing.
+- A "in N minutes" rule edited and approved again fired at the old time; it now counts from the new
+  approval, and switching it back on restarts the timer.
+- Switching between two Wi-Fi networks fires "disconnected" for the old one and "connected" for the
+  new one; before, the change could be dropped as a duplicate. Arming "when I connect to X" while
+  already connected no longer fires at once.
+- Long programs no longer stop after 70 minutes with the screen off, and an exact alarm in Doze runs
+  when it is due instead of at the next wake-up.
+- Location rules no longer fire "arrived" again when the app process restarts.
+- A missed call is no longer lost if the app dies while the "call ended" rule runs.
+- Time rules recover after "Alarms & reminders" is revoked. The persistent notification goes away when
+  nothing needs it any more.
+- AI replies to a burst of more than eight messages answer the whole burst, a second AI rule on the
+  same chat runs, and a failed reply no longer marks the other messages as answered.
+- A cut-off AI answer is never sent as a reply, shown as a notification or saved in a variable (OpenAI
+  and Gemini with web search did not notice the cut).
+- A model draft with a misspelled field is rejected and retried once; before, the field vanished and
+  the rule could be broader than the model had described.
+- "App in the foreground" without Shizuku no longer turns false when you change screen inside the app.
+- `not (x > 5)` with a non-numeric `x` is no longer true.
+- A schedule that can never fire (30 February) is rejected at approval.
+- The Log no longer shows a blocked program as fired, nor a rule switched off mid-run as an error;
+  "Why didn't it fire?" warns when the last run's actions failed.
+- Calls that time out count toward the hourly and daily AI caps; providers that report no usage show
+  estimated tokens ("≈") that count toward the token cap; budget alerts come back after you change the
+  limits; one odd usage field no longer hides a whole turn from the budget.
+- Log trimming keeps pending manual replies and the protection against duplicate events.
+- A temporary provider error no longer switches structured output off for the session, and provider
+  requests are not sent twice after a dropped connection.
+- The "Change app" sheet no longer spins forever after the app is killed in the background.
+
+### Changed
+
+- Approval shows the cooldown under WHEN, draws invisible and text-direction characters as visible
+  `⟨U+…⟩` markers, shows line breaks inside typed text and request bodies as `⏎`, writes the real host of
+  a link on its own line, reads loop conditions as "While…", marks rules that come from an imported
+  file, lists every unit of a delay ("1 day and 30 minutes"), says "about" for flexible times and shows
+  the volume as a percentage. Labels that were raw codes are translated.
+- A program stops at 30 AI calls in one run; approval warns about an AI call inside a loop and states
+  the worst case per run.
+- In a cron schedule, a day field that starts with `*` (such as `*/2`) no longer counts as a
+  restriction: `0 9 */2 * 1` fires on Mondays that fall on odd days, as in standard cron, not on every
+  odd day plus every Monday.
+- HTTP header values must be plain ASCII (they failed at every run before; now approval says so).
+- Read-aloud text is limited to 1000 characters after its variables are filled in.
+- Rules approved before this release that put external data in one of the positions now refused show
+  the error and must be rewritten. A screen macro that opens another app on purpose (a share sheet, a
+  browser tab) now stops there.
+- Database version 14: 12→13 adds rule labels, 13→14 stored values and modes. Both migrations run by
+  themselves and change no existing rule; approved rules keep their fingerprints.
+- The end-to-end suite has 216 rules.
+
+### Permissions
+
+- `READ_CALENDAR`, `SEND_SMS`, `CALL_PHONE`, `READ_CONTACTS` and `NFC`, plus the call screening role; each
+  is asked for only when a rule needs it. NFC and telephony are optional hardware.
+
+### Known limits
+
+- NFC: shell commands and screen macros run only for a scan proven to come from the system's NFC service,
+  which Android allows to check from Android 15 on. Phones may not share that identity, so an NFC rule may
+  never start shell or a macro; its other actions run. Nothing fires while the phone is locked.
+- "Also active before unlock" accepts only repeating clock rules (cron) whose actions are Do Not Disturb,
+  ringer, volume, flashlight or vibration and whose conditions are clock-only: no battery, charger or
+  screen triggers.
+- `screen_call` with "only numbers not in my contacts" applies to the whole rule: a contact calling runs
+  nothing, and when Argus cannot tell (no contacts permission, an error) the call rings and nothing else
+  runs.
+- Stored values marked secret go only into the encrypted automatic backup, never into a plain export;
+  vault secrets are in no backup at all and must be entered again on a new phone.
+- Not yet exercised on real hardware: NFC tags, call screening and a real SMS or call. The emulator used
+  for this release has no NFC and no SIM, so these are covered by unit tests only; when in doubt they do
+  not act (an unverified scan starts no shell, a call that cannot be judged rings).
+- `send_sms` reports success once the message is handed to the phone's SMS service; it does not wait for
+  the network's delivery result.
+- A clock rule can miss the one occurrence that falls while the phone is shutting down or restarting.
+- Shake and face down work only while the screen is on.
+- The dry run does not simulate the SMS and call caps, the AI budget or a cooldown in progress, and it
+  does not take readings that need Shizuku or root: those conditions count as unknown, so not met.
+- The Hermes bridge compiles only its own vocabulary: the triggers time, immediate, notification,
+  geofence (enter or exit), SMS and calls, connectivity and the basic sensors, and the actions it knew
+  before 0.4.1. Manual, screen, battery and app triggers, the 0.4.1 and 0.5.1 actions and everything
+  added in this release need a direct provider.
+
 ## v0.7.1 (2026-11-16) — AI servers on your network, response timeout, copyable chat
 
 ### Added

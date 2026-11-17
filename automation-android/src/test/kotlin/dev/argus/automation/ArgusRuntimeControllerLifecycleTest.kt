@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import dev.argus.automation.geofence.GeofenceReconcileReport
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
+import dev.argus.automation.notification.NotificationListenerWatchdog
 import dev.argus.automation.phone.CallStateSnapshot
 import dev.argus.automation.phone.CallStateStore
 import dev.argus.automation.phone.PhoneEventIngress
@@ -201,6 +202,67 @@ class ArgusRuntimeControllerLifecycleTest {
         awaitUntil("sensore riconciliato dopo l'eliminazione") { sensor.calls.get() > before }
     }
 
+    @Test
+    fun `spans are reconciled at every reconcile and after a rule change`() = withFixture { env ->
+        // 0.8: spegnere o cancellare una regola in corso rimette i valori; l'avvio ripulisce gli intervalli stantii.
+        val rule = sensorRule()
+        val rules = FakeRules(listOf(rule))
+        val calls = AtomicInteger()
+        val controller = env.controller(store = rules, spanReconciler = { calls.incrementAndGet() })
+
+        controller.reconcile(ReconcileReason.APP_START)
+        assertEquals(1, calls.get())
+        controller.start()
+        awaitUntil("intervalli riconciliati all'avvio") { calls.get() >= 2 }
+        delay(300)
+        val before = calls.get()
+
+        rules.remove(rule.id)
+
+        awaitUntil("intervalli riconciliati dopo l'eliminazione") { calls.get() > before }
+    }
+
+    @Test
+    fun `every reconcile runs the capability health check`() = withFixture { env ->
+        val checks = AtomicInteger()
+        val controller = env.controller(capabilityHealth = { checks.incrementAndGet() })
+
+        controller.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        controller.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(2, checks.get())
+    }
+
+    @Test
+    fun `a failing health check does not stop the reconcile`() = withFixture { env ->
+        val geofence = CountingGeofence()
+        val controller = env.controller(geofence = geofence, capabilityHealth = { error("probe rotto") })
+
+        controller.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+
+        assertEquals(1, geofence.calls.get())
+    }
+
+    @Test
+    fun `the notification listener is rebound at most once per interval`() = withFixture { env ->
+        val rebinds = AtomicInteger()
+        val controller = env.controller(
+            listenerWatchdog = NotificationListenerWatchdog(
+                notificationRulesArmed = { true },
+                accessGranted = { true },
+                connected = { false },
+                requestRebind = { rebinds.incrementAndGet() },
+            ),
+        )
+
+        controller.maintenanceIfDue()
+        awaitUntil("primo ricollegamento") { rebinds.get() == 1 }
+        // Stesso istante (orologio fermo): l'intervallo non è passato, nessuna seconda richiesta.
+        controller.maintenanceIfDue()
+        delay(200)
+        assertEquals(1, rebinds.get())
+    }
+
     private fun withFixture(body: suspend (Env) -> Unit) {
         runBlocking {
             val context = ApplicationProvider.getApplicationContext<Context>()
@@ -223,6 +285,9 @@ class ArgusRuntimeControllerLifecycleTest {
             phoneIngress: PhoneEventIngress? = null,
             store: AutomationStore? = null,
             audit: AuditSink = RecordingAudit(),
+            capabilityHealth: (suspend () -> Unit)? = null,
+            listenerWatchdog: NotificationListenerWatchdog? = null,
+            spanReconciler: (suspend () -> Unit)? = null,
         ) = ArgusRuntimeController(
             scope = scope,
             scheduler = scheduler,
@@ -240,6 +305,9 @@ class ArgusRuntimeControllerLifecycleTest {
             nowMillis = { 1_000L },
             store = store,
             audit = audit,
+            capabilityHealth = capabilityHealth,
+            listenerWatchdog = listenerWatchdog,
+            spanReconciler = spanReconciler,
         )
     }
 
@@ -338,7 +406,7 @@ class ArgusRuntimeControllerLifecycleTest {
         private val pending = java.util.concurrent.atomic.AtomicReference<TriggerEnvelope?>(initial)
         override fun last(): CallStateSnapshot? = null
         override fun pending(): TriggerEnvelope? = pending.get()
-        override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?) {
+        override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?, next: TriggerEnvelope?) {
             this.pending.set(pending)
         }
 

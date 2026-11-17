@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.ui.tooling.preview)
+    // 0.7.2: codice QR di una regola condivisa. Solo l'encoder di ZXing core: niente fotocamera né scanner.
+    implementation(libs.zxing.core)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")

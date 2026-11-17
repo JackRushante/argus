@@ -72,6 +72,8 @@ import dev.argus.shizuku.ShizukuIdentity
 import dev.argus.shizuku.ShizukuIdentityProbe
 import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
+import dev.argus.automation.backup.AutoBackupTestRig
+import dev.argus.ui.model.AutoBackupUi
 import dev.argus.ui.model.RulesBackupKind
 import dev.argus.ui.model.RulesBackupStatus
 import dev.argus.ui.model.ShizukuStatus
@@ -104,6 +106,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowAlarmManager
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -224,6 +227,20 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `settings carry the health alerts switch, on by default, and flip it`() = runTest(dispatcher) {
+        val alerts = dev.argus.automation.health.FakeHealthAlertStore()
+        val vm = settingsViewModel(FakeProviderStore(), healthAlerts = alerts)
+        observe(vm)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.healthAlertsEnabled)
+
+        vm.setHealthAlertsEnabled(false)
+        advanceUntilIdle()
+        assertFalse(alerts.enabled.value)
+        assertFalse(vm.state.value.healthAlertsEnabled)
+    }
+
+    @Test
     fun `english settings emits english runtime feedback`() = runTest(dispatcher) {
         val vm = settingsViewModel(FakeProviderStore(), language = RenderLanguage.EN)
         observe(vm)
@@ -293,6 +310,85 @@ class SettingsViewModelTest {
         assertTrue(store.hasApiKeyBlocking(ProviderId.OPENAI))
         val call = store.saveCalls.last { it.id == ProviderId.OPENAI }
         assertNull(call.apiKey, "una save con apiKey null non deve inviare una scrittura di chiave")
+    }
+
+    // --- S6: la chiave salvata non parte verso un altro server ---
+
+    @Test
+    fun `a new server origin without a new key removes the saved key and says so`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.CUSTOM_OPENAI_COMPAT, baseUrl = "https://api.cloud.example/v1", key = "sk-cloud-1234567890")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("custom_openai_compat", baseUrl = "http://127.0.0.1:11434/v1", model = "qwen", apiKey = null)
+        advanceUntilIdle()
+
+        assertFalse(store.hasApiKeyBlocking(ProviderId.CUSTOM_OPENAI_COMPAT))
+        assertTrue(
+            messages.any { "the saved key was removed" in it },
+            messages.toString(),
+        )
+    }
+
+    @Test
+    fun `the same origin or a new key keeps the key without a notice`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.CUSTOM_OPENAI_COMPAT, baseUrl = "https://api.cloud.example/v1", key = "sk-cloud-1234567890")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("custom_openai_compat", baseUrl = "https://api.cloud.example/v2", model = "qwen", apiKey = null)
+        advanceUntilIdle()
+        assertTrue(store.hasApiKeyBlocking(ProviderId.CUSTOM_OPENAI_COMPAT))
+
+        vm.saveProviderConfig("custom_openai_compat", baseUrl = "http://127.0.0.1:11434/v1", model = "qwen", apiKey = "local")
+        advanceUntilIdle()
+        assertTrue(store.hasApiKeyBlocking(ProviderId.CUSTOM_OPENAI_COMPAT))
+        assertTrue(messages.none { "key was removed" in it }, messages.toString())
+    }
+
+    @Test
+    fun `remove key clears the saved key of that provider`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.OPENAI, key = "sk-existing-1234567890")
+            seed(ProviderId.ANTHROPIC, key = "sk-ant-existing-1234567890")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.removeProviderKey("openai")
+        advanceUntilIdle()
+
+        assertFalse(store.hasApiKeyBlocking(ProviderId.OPENAI))
+        assertTrue(store.hasApiKeyBlocking(ProviderId.ANTHROPIC))
+        assertEquals("Key removed.", messages.last())
+    }
+
+    @Test
+    fun `the bridge refuses a new server without a new bearer and keeps the old one`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.HERMES, baseUrl = "https://hermes.old", key = "bearer-existing-0123456789")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveBridge("https://hermes.other", null)
+        advanceUntilIdle()
+
+        assertEquals("https://hermes.old", store.providerConfig(ProviderId.HERMES).baseUrl)
+        assertTrue(store.hasApiKeyBlocking(ProviderId.HERMES))
+        assertEquals("The server address changed: enter the bearer again.", messages.last())
     }
 
     @Test
@@ -801,6 +897,125 @@ class SettingsViewModelTest {
         )
     }
 
+    // ---- 0.7.2: import cifrato e backup automatico ---------------------------------------------------
+
+    @Test
+    fun `an encrypted file asks for the passphrase, then imports like a plain file`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED)
+            encryptedOutcome = ImportOutcome.Done(ImportSummary(imported = 3, discarded = emptyMap()))
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+        assertEquals(RulesBackupStatus.NeedsPassphrase(), vm.state.value.backup.status)
+
+        vm.submitImportPassphrase("cavallo-batteria")
+        advanceUntilIdle()
+
+        assertEquals(listOf("cavallo-batteria"), backup.passphrases)
+        assertEquals(
+            RulesBackupStatus.Done(RulesBackupKind.IMPORT, "3 regole importate da approvare.", importedCount = 3),
+            vm.state.value.backup.status,
+        )
+        // Finito l'import, una passphrase in più non riapre nulla.
+        vm.submitImportPassphrase("cavallo-batteria")
+        advanceUntilIdle()
+        assertEquals(1, backup.passphrases.size)
+    }
+
+    @Test
+    fun `a wrong passphrase asks again with a clear reason and never lands in the state`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED)
+            encryptedOutcome = ImportOutcome.Failed(BackupFailure.WRONG_PASSPHRASE)
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        vm.submitImportPassphrase("segreto-sbagliato")
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.NeedsPassphrase(
+                "Passphrase errata, oppure il file è stato modificato dopo il backup. Non è stato importato nulla.",
+            ),
+            vm.state.value.backup.status,
+        )
+        assertFalse("segreto-sbagliato" in vm.state.value.toString())
+    }
+
+    @Test
+    fun `cancelling the passphrase prompt forgets the encrypted file`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { importOutcome = ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED) }
+        val vm = backupVm(backup)
+        observe(vm)
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        vm.dismissBackupResult()
+        vm.submitImportPassphrase("cavallo-batteria")
+        advanceUntilIdle()
+
+        assertEquals(RulesBackupStatus.Idle, vm.state.value.backup.status)
+        assertTrue(backup.passphrases.isEmpty())
+    }
+
+    @Test
+    fun `without the coordinator there is no automatic backup card`() = runTest(dispatcher) {
+        val vm = backupVm(FakeRulesBackup())
+        observe(vm)
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.backup.autoBackup)
+    }
+
+    @Test
+    fun `the automatic backup card follows the coordinator and the passphrase stays out of the state`() =
+        runTest(dispatcher) {
+            val rig = AutoBackupTestRig(scope = this, now = System.currentTimeMillis())
+            val vm = settingsViewModel(FakeProviderStore(), autoBackup = rig.coordinator)
+            observe(vm)
+            advanceUntilIdle()
+            assertEquals(AutoBackupUi(), vm.state.value.backup.autoBackup)
+
+            vm.chooseAutoBackupFolder(Uri.parse(AutoBackupTestRig.FOLDER))
+            vm.setAutoBackupPassphrase("cavallo-batteria")
+            advanceUntilIdle()
+
+            val ui = requireNotNull(vm.state.value.backup.autoBackup)
+            assertEquals("Backup", ui.folderLabel)
+            assertTrue(ui.passphraseSet && ui.ready)
+            assertFalse("cavallo-batteria" in vm.state.value.toString())
+            assertNotNull(rig.keys.saved)
+
+            vm.setAutoBackupEnabled(true)
+            advanceUntilIdle()
+            val running = requireNotNull(vm.state.value.backup.autoBackup)
+            assertTrue(running.enabled)
+            assertTrue(running.lastRun!!.startsWith("Ultimo backup: oggi"), running.lastRun)
+            assertEquals(1, rig.folder.files.size)
+        }
+
+    @Test
+    fun `a too short passphrase is refused with a message and nothing is saved`() = runTest(dispatcher) {
+        val rig = AutoBackupTestRig(scope = this, now = System.currentTimeMillis())
+        val vm = settingsViewModel(FakeProviderStore(), autoBackup = rig.coordinator)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.setAutoBackupPassphrase("corta")
+        advanceUntilIdle()
+
+        assertNull(rig.keys.saved)
+        assertEquals(listOf("La passphrase deve avere almeno 8 caratteri."), messages)
+    }
+
     @Test
     fun `an unexpected exception becomes an error state and the next request still works`() = runTest(dispatcher) {
         val backup = FakeRulesBackup().apply { failure = IllegalStateException("boom") }
@@ -818,6 +1033,55 @@ class SettingsViewModelTest {
         vm.importRules(backupFile)
         advanceUntilIdle()
         assertTrue(vm.state.value.backup.status is RulesBackupStatus.Done)
+    }
+
+    @Test
+    fun `importing from text uses the same import and shows the summary`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Done(ImportSummary(imported = 1, discarded = emptyMap()), listOf("d1"))
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importText("""{"format":"argus-rules"}""")
+        advanceUntilIdle()
+
+        assertEquals(listOf("""{"format":"argus-rules"}"""), backup.importedTexts)
+        assertEquals(
+            RulesBackupStatus.Done(RulesBackupKind.IMPORT, "1 regola importata da approvare.", importedCount = 1),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `a text over the size cap is refused before it is imported`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup()
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importText("x".repeat(dev.argus.data.backup.RulesBackupFormat.MAX_FILE_BYTES + 1))
+        advanceUntilIdle()
+
+        assertEquals(emptyList(), backup.importedTexts)
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.IMPORT, "Il testo è troppo grande (limite 2 MB)."),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `a text that is not a rule says so`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { importOutcome = ImportOutcome.Failed(BackupFailure.NOT_JSON) }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importText("ciao")
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.IMPORT, "Questo testo non è una regola Argus né un backup delle regole."),
+            vm.state.value.backup.status,
+        )
     }
 
     @Test
@@ -917,6 +1181,8 @@ class SettingsViewModelTest {
         rulesBackup: RulesBackup = FakeRulesBackup(),
         pause: FakePauseStore = FakePauseStore(),
         privileged: dev.argus.automation.privileged.PrivilegedAccessCenter? = null,
+        autoBackup: dev.argus.automation.backup.AutoBackupCoordinator? = null,
+        healthAlerts: dev.argus.automation.health.HealthAlertStore? = null,
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -947,6 +1213,8 @@ class SettingsViewModelTest {
             rulesBackup = rulesBackup,
             pause = pause,
             privileged = privileged,
+            autoBackup = autoBackup,
+            healthAlerts = healthAlerts,
         )
     }
 
@@ -2148,6 +2416,34 @@ private class FakeRulesBackup : RulesBackup {
         gate?.await()
         failure?.let { throw it }
         return importOutcome
+    }
+
+    val importedTexts = mutableListOf<String>()
+    var previewResult: dev.argus.data.backup.ImportPreview =
+        dev.argus.data.backup.ImportPreview.Ready(listOf("Regola"), emptyMap(), sizeBytes = 10)
+
+    override suspend fun read(source: Uri): dev.argus.data.backup.DocumentRead =
+        dev.argus.data.backup.DocumentRead.Failed(dev.argus.data.backup.BackupFailure.READ_FAILED)
+
+    override suspend fun importBytes(bytes: ByteArray): ImportOutcome {
+        importedTexts += bytes.toString(Charsets.UTF_8)
+        gate?.await()
+        failure?.let { throw it }
+        return importOutcome
+    }
+
+    override fun preview(bytes: ByteArray): dev.argus.data.backup.ImportPreview = previewResult
+
+    /** Passphrase ricevute, come testo: solo nel fake, per verificare cosa arriva al servizio. */
+    val passphrases = mutableListOf<String>()
+    var encryptedOutcome: ImportOutcome = ImportOutcome.Done(ImportSummary(imported = 2, discarded = emptyMap()))
+
+    override suspend fun importEncrypted(source: Uri, passphrase: CharArray): ImportOutcome {
+        imports += source
+        passphrases += String(passphrase)
+        gate?.await()
+        failure?.let { throw it }
+        return encryptedOutcome
     }
 }
 

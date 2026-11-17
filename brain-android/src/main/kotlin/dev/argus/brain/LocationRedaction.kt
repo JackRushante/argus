@@ -83,6 +83,14 @@ object LocationRedaction {
             trigger = (source.trigger as? Trigger.Geofence)?.let { onGeofence("trigger", it) } ?: source.trigger,
             conditions = source.conditions?.let { rewriteCondition(it, "conditions") },
             actions = rewriteActions(source.actions, "actions"),
+            // 0.8: il trigger d'uscita di una regola-intervallo può essere un geofence, e le sue azioni
+            // possono contenere `location_in` in un if/while.
+            exit = source.exit?.let { exit ->
+                exit.copy(
+                    trigger = (exit.trigger as? Trigger.Geofence)?.let { onGeofence("exit.trigger", it) } ?: exit.trigger,
+                    actions = rewriteActions(exit.actions, "exit.actions"),
+                )
+            },
         )
 
         private fun rewriteActions(items: List<Action>, path: String): List<Action> =

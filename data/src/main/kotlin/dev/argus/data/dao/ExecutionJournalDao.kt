@@ -200,6 +200,18 @@ interface ExecutionJournalDao {
         since30Millis: Long,
     ): Flow<RuleFireStats>
 
+    /**
+     * Esiti delle ultime [limit] esecuzioni CONCLUSE di [automationId], dalla più recente (avvisi di
+     * salute, 0.7.2). Contano riuscite, fallite, parziali e interrotte; soppressioni, annullamenti e
+     * esecuzioni ancora aperte o in attesa non sono esiti e restano fuori. Sola lettura, nessuno schema nuovo.
+     */
+    @Query(
+        "SELECT status FROM fire_claims WHERE automationId = :automationId " +
+            "AND status IN ('SUCCEEDED', 'FAILED', 'PARTIAL', 'INTERRUPTED') " +
+            "ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :limit",
+    )
+    suspend fun recentOutcomes(automationId: String, limit: Int): List<ExecutionStatus>
+
     @Query("SELECT COUNT(*) FROM fire_claims")
     suspend fun executionCount(): Int
 
@@ -212,12 +224,22 @@ interface ExecutionJournalDao {
     )
     suspend fun interruptStale(staleBeforeMillis: Long, atMillis: Long): Int
 
+    /**
+     * Conservazione delle esecuzioni (B13). Non si toccano mai: le esecuzioni aperte (RUNNING,
+     * SUBMITTED), una DEFERRED la cui risposta manuale è ancora consegnabile (la FK CASCADE la
+     * cancellerebbe) e, dal tetto di righe, i claim più giovani di [dedupSinceMillis]: sono la
+     * deduplica degli eventi, e senza di loro una ripubblicazione della stessa notifica rifarebbe
+     * scattare la regola. L'età massima ([olderThanMillis], almeno 7 giorni) vale per tutti gli altri.
+     */
     @Query(
-        "DELETE FROM fire_claims WHERE status NOT IN ('RUNNING', 'SUBMITTED') AND (" +
-            "claimedAtMillis < :olderThanMillis OR executionId NOT IN (" +
-            "SELECT executionId FROM fire_claims ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :maxRows))",
+        "DELETE FROM fire_claims WHERE status NOT IN ('RUNNING', 'SUBMITTED') " +
+            "AND NOT (status = 'DEFERRED' AND executionId IN (" +
+            "SELECT executionId FROM deferred_replies " +
+            "WHERE consumedAtMillis IS NULL AND expiresAtMillis > :nowMillis)) " +
+            "AND (claimedAtMillis < :olderThanMillis OR (claimedAtMillis < :dedupSinceMillis AND executionId NOT IN (" +
+            "SELECT executionId FROM fire_claims ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :maxRows)))",
     )
-    suspend fun trim(olderThanMillis: Long, maxRows: Int): Int
+    suspend fun trim(olderThanMillis: Long, maxRows: Int, nowMillis: Long, dedupSinceMillis: Long): Int
 
     /** Righe azione delle esecuzioni concluse; quelle aperte o recuperabili restano (vedi [AuditDao]). */
     @Query(

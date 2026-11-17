@@ -398,8 +398,51 @@ class EngineTest {
                 it.executionId == StableExecutionIdFactory.create(waiting.id, eventId)
             }.status,
         )
-        assertTrue(audit.events.any { it.automationId == waiting.id && it.detail == "cancelled" })
-        assertTrue(audit.events.none { it.automationId == waiting.id && it.kind == AuditKind.FIRED })
+        // La disattivazione non è un errore: ha un suo esito, mai ERROR né FIRED.
+        assertEquals(
+            listOf(AuditKind.SUPPRESSED_NOT_ELIGIBLE to "cancelled"),
+            audit.events.filter { it.automationId == waiting.id }.map { it.kind to it.detail },
+        )
+    }
+
+    @Test
+    fun `a program stopped by a policy code is audited once as blocked and never as fired`() = runTest {
+        val automation = armed(
+            id = "p4-policy-stop",
+            t = Trigger.Notification("com.example"),
+            acts = listOf(Action.ShowNotification("Argus", "code \${code}")),
+            vars = listOf(
+                VarBinding.TriggerPayload(
+                    "code",
+                    TriggerField.TEXT,
+                    extractionRegex = "([0-9]{6})",
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                ),
+            ),
+        )
+        val audit = FakeAuditSink()
+        val journal = FakeExecutionJournal()
+        val executed = mutableListOf<Action>()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { action, _ ->
+                executed += action
+                ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            audit = audit,
+            journal = journal,
+        ).onTrigger(
+            envelope("notification:policy-stop", TriggerEvent.NotificationPosted("com.example", text = "no digits")),
+        ) { DeviceState() }
+
+        assertTrue(executed.isEmpty())
+        assertEquals(
+            listOf(AuditKind.BLOCKED_POLICY to "binding_unavailable"),
+            audit.events.map { it.kind to it.detail },
+        )
+        assertEquals(ExecutionStatus.FAILED, journal.completions.single().status)
     }
 
     @Test

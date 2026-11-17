@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NightsStay
@@ -191,6 +192,7 @@ fun ChatScreen(
                 sending = state.sending,
                 onInputChange = callbacks::onInputChange,
                 onSend = callbacks::onSend,
+                onDictate = if (state.dictationAvailable) callbacks::onDictate else null,
             )
         }
     }
@@ -873,6 +875,8 @@ private fun ChatInputBar(
     sending: Boolean,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
+    /** null = nessun riconoscitore vocale installato: il microfono non compare. */
+    onDictate: (() -> Unit)? = null,
 ) {
     val canSend = enabled && input.isNotBlank()
     val scheme = MaterialTheme.colorScheme
@@ -912,6 +916,16 @@ private fun ChatInputBar(
                 disabledIndicatorColor = Color.Transparent,
             ),
         )
+        if (onDictate != null) {
+            // Dettatura: il testo riconosciuto arriva nel campo, da rileggere; l'invio resta all'utente.
+            ArgusIconButton(
+                icon = Icons.Rounded.Mic,
+                contentDescription = stringResource(R.string.chat_dictate),
+                onClick = onDictate,
+                enabled = enabled,
+                modifier = Modifier.padding(bottom = 4.dp).testTag("chat_dictate"),
+            )
+        }
         FilledIconButton(
             onClick = onSend,
             enabled = canSend,
@@ -1100,6 +1114,15 @@ private fun ChatInternalErrorPreview() {
 private fun ChatComposedPreview() {
     ArgusTheme {
         ChatScreen(previewState(items = previewConversation, input = "Rendila valida anche il sabato mattina."), NoopChatCallbacks)
+    }
+}
+
+/** 0.7.2: con un riconoscitore vocale installato il campo ha il microfono accanto a Invia. */
+@ChatScreenPreviews
+@Composable
+private fun ChatDictationPreview() {
+    ArgusTheme {
+        ChatScreen(previewState(items = previewConversation).copy(dictationAvailable = true), NoopChatCallbacks)
     }
 }
 

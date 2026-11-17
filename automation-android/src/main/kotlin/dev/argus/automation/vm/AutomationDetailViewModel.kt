@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import android.content.Context
+import android.net.Uri
 import android.os.PowerManager
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -13,6 +14,7 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.BlockCause
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
+import dev.argus.automation.nfc.NfcTagReadResult
 import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.RenderLanguageSource
@@ -21,6 +23,15 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
 import dev.argus.automation.apps.EmptyInstalledAppCatalog
 import dev.argus.automation.apps.InstalledAppCatalog
+import dev.argus.automation.directboot.BeforeUnlockOptInStore
+import dev.argus.automation.directboot.NoBeforeUnlockOptIns
+import dev.argus.automation.labels.LabelsSnapshot
+import dev.argus.engine.directboot.DirectBootCopy
+import dev.argus.engine.directboot.DirectBootPolicy
+import dev.argus.ui.model.BeforeUnlockUi
+import dev.argus.automation.labels.NoRuleLabelDirectory
+import dev.argus.automation.labels.RuleLabelDirectory
+import dev.argus.data.LabelAddResult
 import dev.argus.automation.manual.AddToHomeResult
 import dev.argus.automation.manual.ManualEntryService
 import dev.argus.automation.manual.ManualRuleCatalog
@@ -30,6 +41,9 @@ import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.PersistedGeofenceRegistration
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.backup.RuleSharing
+import dev.argus.data.backup.RulesBackupFormat
+import dev.argus.data.backup.isBackupExportable
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.data.entities.ActionResultEntity
@@ -42,15 +56,20 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_P4
+import dev.argus.engine.model.AutomationSchema
+import dev.argus.engine.runtime.ProgramInterpreter
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.toDraft
+import dev.argus.engine.runtime.ActiveSpan
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.SpanStore
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftDeleteResult
 import dev.argus.engine.safety.DraftId
@@ -68,9 +87,14 @@ import dev.argus.ui.model.AppInfoUi
 import dev.argus.ui.model.AutomationDetailState
 import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleDiagnosisUi
+import dev.argus.ui.model.RuleLabelUi
+import dev.argus.ui.model.RuleLabelsUi
+import dev.argus.ui.model.RuleShareText
+import dev.argus.ui.model.RuleShareUi
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.presentation.RuleRenderDiff
 import dev.argus.ui.presentation.RuleRenderMapper
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.ValidationMessages
@@ -85,6 +109,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -143,6 +168,8 @@ private data class DiagnosisSnapshot(
     val alarm: ScheduledTimeAlarmEntity?,
     val geofence: PersistedGeofenceRegistration?,
     val checkedAtMillis: Long,
+    /** 0.8: l'intervallo in corso della regola, se ce n'è uno. */
+    val span: ActiveSpan? = null,
 )
 
 private data class DetailTarget(
@@ -188,6 +215,14 @@ class AutomationDetailViewModel @Inject constructor(
     @ApplicationContext private val context: Context? = null,
     /** 0.7.0: nomi delle app, app installate per «Cambia app». Resta sul telefono. */
     private val appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
+    /** 0.7.2: etichette della regola (organizzazione: mai una nuova approvazione). */
+    private val ruleLabels: RuleLabelDirectory = NoRuleLabelDirectory,
+    /** 0.7.2: testi e file di «Condividi». `null` solo nei test che non lo provano: «Condividi» non compare. */
+    private val sharing: RuleSharing? = null,
+    /** 0.8: regole-intervallo in corso, per «Perché non è scattata?». `null` nei test che non lo provano. */
+    private val spans: SpanStore? = null,
+    /** 0.8: «Attiva anche prima dello sblocco» (organisation: never a new approval). */
+    private val beforeUnlock: BeforeUnlockOptInStore = NoBeforeUnlockOptIns,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -232,8 +267,14 @@ class AutomationDetailViewModel @Inject constructor(
     /** 0.7.0: elenco di «Cambia app»; `null` = non ancora caricato. Si azzera alla chiusura della schermata. */
     private val appChoices = MutableStateFlow<List<AppChoiceUi>?>(null)
 
+    /** 0.7.2: il foglio «Condividi regola» aperto (i due testi), `null` = chiuso. Solo in memoria. */
+    private val shareTexts = MutableStateFlow<RuleShareUi?>(null)
+
     /** Ultima diagnosi chiesta («Perché non è scattata?»); null finché l'utente non la apre. */
     private val diagnosisInputs = MutableStateFlow<DiagnosisSnapshot?>(null)
+
+    /** 0.7.2: etichette per regola e gruppi in pausa, dall'ultima emissione della directory. */
+    private val labelSnapshot = MutableStateFlow(LabelsSnapshot())
     private var diagnosisJob: Job? = null
 
     init {
@@ -245,6 +286,20 @@ class AutomationDetailViewModel @Inject constructor(
                     mutableState.update { it.withLiveExtras() }
                 }
             }
+        }
+        // 0.7.2: etichette e gruppi in pausa cambiano fuori dal flusso della regola: si aggiornano solo
+        // la riga «Etichette» e la pausa dell'avvio manuale.
+        viewModelScope.launch {
+            ruleLabels.snapshot
+                .catch { error -> if (error is CancellationException) throw error }
+                .collect { snapshot ->
+                    labelSnapshot.value = snapshot
+                    mutableState.update { it.withLiveExtras() }
+                }
+        }
+        // 0.8: the option «active before unlock» changes outside the rule's flow: only its card is refreshed.
+        viewModelScope.launch {
+            beforeUnlock.optIns.collect { mutableState.update { it.withLiveExtras() } }
         }
         // F8/F21: la pausa e il riquadro scelto cambiano fuori dal flusso della regola: si aggiorna
         // solo la parte "avvio manuale" dello stato mostrato, senza rifare il resto.
@@ -259,7 +314,11 @@ class AutomationDetailViewModel @Inject constructor(
                         } else {
                             current.copy(
                                 detail = detail.copy(
-                                    manual = entry.copy(paused = paused, isTileRule = tileRule == detail.id),
+                                    manual = entry.copy(
+                                        // 0.7.2: anche la pausa di un gruppo (etichetta) della regola ferma l'avvio manuale.
+                                        paused = paused || labelSnapshot.value.isRulePaused(detail.id),
+                                        isTileRule = tileRule == detail.id,
+                                    ),
                                 ),
                             )
                         }
@@ -341,6 +400,7 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.actionsByExecution,
                         sources.conversationLabels,
                         sources.language,
+                        approved = sources.automation,
                     )
                     sources.automation != null -> automationState(
                         sources.automation,
@@ -445,6 +505,24 @@ class AutomationDetailViewModel @Inject constructor(
                             "Current location is unavailable.",
                             "Posizione attuale non disponibile.",
                         ),
+                    )
+                    // 0.8: il tag della regola si legge all'attivazione, in primo piano.
+                    is FlowArmResult.NfcTagNotRead -> stayWith(
+                        when (result.reason) {
+                            NfcTagReadResult.NoNfc -> language.pick(
+                                "This phone has no NFC.",
+                                "Questo telefono non ha l'NFC.",
+                            )
+                            NfcTagReadResult.NfcOff -> language.pick(
+                                "NFC is off: turn it on and arm the rule again.",
+                                "L'NFC è spento: accendilo e arma di nuovo la regola.",
+                            )
+                            NfcTagReadResult.TimedOut -> language.pick(
+                                "No tag was read: hold it to the phone when you arm the rule.",
+                                "Nessun tag letto: avvicinalo al telefono quando armi la regola.",
+                            )
+                            else -> language.pick("The tag was not read.", "Tag non letto.")
+                        },
                     )
                     FlowArmResult.IntegrityFailure -> stayWith(
                         language.pick("Invalid draft integrity.", "Integrità della bozza non valida."),
@@ -615,6 +693,12 @@ class AutomationDetailViewModel @Inject constructor(
                         geofenceState.get(automation.id)
                 }
                 val alarm = database.scheduledTimeAlarmDao().get(automation.id.value)
+                // 0.8: una regola-intervallo dice se è in corso (e quanti valori rimetterà).
+                val span = if (automation.exit != null) {
+                    runCatching { spans?.get(automation.id) }.getOrNull()
+                } else {
+                    null
+                }
                 diagnosisInputs.value = DiagnosisSnapshot(
                     automationId = automation.id,
                     fingerprint = automation.approvalFingerprint,
@@ -622,6 +706,7 @@ class AutomationDetailViewModel @Inject constructor(
                     alarm = alarm,
                     geofence = registration,
                     checkedAtMillis = System.currentTimeMillis(),
+                    span = span,
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -644,7 +729,14 @@ class AutomationDetailViewModel @Inject constructor(
                 message(
                     when (val result = manual.run(automation.id.value)) {
                         is ManualRunResult.Accepted ->
-                            if (result.paused) {
+                            if (result.paused && !manual.paused.value) {
+                                // 0.7.2: non è la pausa globale ma un gruppo (etichetta) di questa regola.
+                                language.pick(
+                                    "A label group of this rule is paused: the run was skipped. Resume the group to run it.",
+                                    "Un gruppo (etichetta) di questa regola è in pausa: l'avvio è stato saltato. " +
+                                        "Riprendi il gruppo per farla partire.",
+                                )
+                            } else if (result.paused) {
                                 language.pick(
                                     "Automations are paused: the run was skipped. Resume them to run rules.",
                                     "Le automazioni sono in pausa: l'avvio è stato saltato. Riprendile per far partire le regole.",
@@ -747,9 +839,17 @@ class AutomationDetailViewModel @Inject constructor(
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
         language: RenderLanguage,
+        approved: Automation? = null,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
         val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels, language)
+        // 0.7.2: la bozza sostituisce una regola già approvata: «Cosa cambia», confrontando le due rese.
+        val changes = approved
+            ?.takeIf {
+                it.id == snapshot.automationId &&
+                    (it.status == AutomationStatus.ARMED || it.status == AutomationStatus.DISABLED)
+            }
+            ?.let { RuleRenderDiff.diff(RuleRenderMapper.map(it, conversationLabels, language), rule) }
         val warnings = if (review == null) {
             listOf(
                 UiWarning(
@@ -774,7 +874,8 @@ class AutomationDetailViewModel @Inject constructor(
                 canArm = canArm,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
                 estimatedLlmCallsPerDay = generativeEstimate(
-                    snapshot.draft.actions.any { it.tier == ActionTier.GENERATIVE },
+                    snapshot.draft.actions,
+                    program = AutomationSchema.versionFor(snapshot.draft) == AUTOMATION_SCHEMA_VERSION_P4,
                     language,
                 ),
                 recentRuns = recent,
@@ -787,19 +888,19 @@ class AutomationDetailViewModel @Inject constructor(
                         )
                     },
                 runNowBlockedReason = runNowBlockedReason(language),
+                // 0.8: una bozza si prova a secco prima di armarla.
+                dryRunAvailable = true,
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
                     readerProbeLabel(evidence.family, evidence.valueType, language)
                 },
                 usesShizuku = requiresShizuku(
-                    CapabilityRequirements.derive(
-                        snapshot.draft.trigger,
-                        snapshot.draft.actions,
-                        snapshot.draft.conditions,
-                        snapshot.draft.vars,
-                    ),
+                    CapabilityRequirements.derive(snapshot.draft),
                 ),
                 appInfo = appInfoFor(snapshot.draft.trigger, snapshot.draft.actions),
                 canChangeApp = snapshot.integrityError == null,
+                // S8: una bozza importata da file lo dice in approvazione.
+                imported = snapshot.createdBy == CreatedBy.IMPORT,
+                changes = changes,
             ),
             automationId = snapshot.automationId.value,
             loading = false,
@@ -850,7 +951,11 @@ class AutomationDetailViewModel @Inject constructor(
                 warnings = warnings,
                 canArm = false,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
-                estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative, language),
+                estimatedLlmCallsPerDay = generativeEstimate(
+                    automation.actions,
+                    program = AutomationSchema.requiresP4(automation),
+                    language,
+                ),
                 recentRuns = recentRuns(automation.id.value, records, actionsByExecution, language),
                 geofencePreviewLabel = null,
                 canRunNow = manualEntry != null,
@@ -868,6 +973,9 @@ class AutomationDetailViewModel @Inject constructor(
                 // Una regola armata non si modifica mai in place: «Cambia app» ne fa una bozza di modifica.
                 canChangeApp = automation.status == AutomationStatus.ARMED ||
                     automation.status == AutomationStatus.DISABLED,
+                canShare = sharing != null && automation.isBackupExportable(),
+                // 0.8: «Prova a secco» simula senza eseguire, anche una regola da rivedere.
+                dryRunAvailable = true,
             ),
             automationId = automation.id.value,
             loading = false,
@@ -892,7 +1000,7 @@ class AutomationDetailViewModel @Inject constructor(
             return null
         }
         return buildRuleDiagnosis(
-            DiagnosisInputs(automation, snapshot.blockCauses, snapshot.alarm, snapshot.geofence, records),
+            DiagnosisInputs(automation, snapshot.blockCauses, snapshot.alarm, snapshot.geofence, records, snapshot.span),
             snapshot.checkedAtMillis,
             language,
         )
@@ -927,12 +1035,185 @@ class AutomationDetailViewModel @Inject constructor(
         val current = detail ?: return this
         val banner = detailEngineBanner(shizukuStatus, current.usesShizuku, batteryExempt())
         val choices = appChoices.value
-        return if (current.banner == banner && current.appChoices == choices) {
+        val labels = ruleLabelsUi()
+        val manualEntry = current.manual?.let { entry ->
+            entry.copy(paused = manual.paused.value || labelSnapshot.value.isRulePaused(current.id))
+        }
+        // Il foglio «Condividi» vale solo per la regola per cui è stato aperto e finché si può condividere.
+        val share = shareTexts.value?.takeIf { current.canShare }
+        val option = beforeUnlockUi()
+        return if (current.banner == banner && current.appChoices == choices && current.labels == labels &&
+            current.manual == manualEntry && current.share == share && current.beforeUnlock == option
+        ) {
             this
         } else {
-            copy(detail = current.copy(banner = banner, appChoices = choices))
+            copy(
+                detail = current.copy(
+                    banner = banner,
+                    appChoices = choices,
+                    labels = labels,
+                    manual = manualEntry,
+                    share = share,
+                    beforeUnlock = option,
+                ),
+            )
         }
     }
+
+    // --- 0.8: «Attiva anche prima dello sblocco» -------------------------------------------------------
+
+    /**
+     * Offered only for the SAVED rule on screen (armed or disabled, never a draft) when it qualifies. On = opted in
+     * for exactly this approved revision.
+     */
+    private fun beforeUnlockUi(): BeforeUnlockUi? {
+        val automation = displayedAutomation ?: return null
+        if (displayedDraft != null) return null
+        if (automation.status != AutomationStatus.ARMED && automation.status != AutomationStatus.DISABLED) return null
+        if (!DirectBootPolicy.qualifies(automation)) return null
+        val fingerprint = automation.approvalFingerprint ?: return null
+        return BeforeUnlockUi(enabled = beforeUnlock.optIns.value[automation.id] == fingerprint)
+    }
+
+    /** Switches the option on (for the revision on screen) or off. No new revision, fingerprint or approval. */
+    fun onSetBeforeUnlock(enabled: Boolean) {
+        val automation = displayedAutomation ?: return
+        if (displayedDraft != null) return
+        if (!enabled) {
+            beforeUnlock.remove(automation.id)
+            return
+        }
+        val fingerprint = automation.approvalFingerprint ?: return
+        if (!DirectBootPolicy.qualifies(automation)) return
+        val others = beforeUnlock.optIns.value.keys - automation.id
+        if (others.size >= DirectBootCopy.MAX_RULES) {
+            mutableEvents.tryEmit(
+                DetailEvent.Message(
+                    language.pick(
+                        "At most ${DirectBootCopy.MAX_RULES} rules can be active before unlock.",
+                        "Al massimo ${DirectBootCopy.MAX_RULES} regole possono essere attive prima dello sblocco.",
+                    ),
+                ),
+            )
+            return
+        }
+        beforeUnlock.set(automation.id, fingerprint)
+    }
+
+    /**
+     * 0.7.2: etichette della regola SALVATA che lo schermo mostra (una bozza non si etichetta) e quelle già in
+     * uso da proporre. Si leggono dalla directory, fuori dal flusso della regola: non la toccano.
+     */
+    private fun ruleLabelsUi(): RuleLabelsUi? {
+        val automation = displayedAutomation ?: return null
+        if (displayedDraft != null) return null
+        val snapshot = labelSnapshot.value
+        return RuleLabelsUi(
+            labels = snapshot.byRule[automation.id.value].orEmpty().map { RuleLabelUi(it, snapshot.isPaused(it)) },
+            existing = snapshot.allLabels,
+        )
+    }
+
+    /** 0.7.2: aggiunge un'etichetta. Nessuna nuova revisione, impronta o approvazione: la regola non cambia. */
+    fun onAddLabel(label: String) {
+        val automation = displayedAutomation ?: return
+        if (displayedDraft != null) return
+        viewModelScope.launch {
+            val result = try {
+                ruleLabels.add(automation.id, label)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            labelAddMessage(result, language)?.let { mutableEvents.emit(DetailEvent.Message(it)) }
+        }
+    }
+
+    /** 0.7.2: toglie un'etichetta; se era l'ultima regola dell'etichetta, l'etichetta sparisce. */
+    fun onRemoveLabel(label: String) {
+        val automation = displayedAutomation ?: return
+        viewModelScope.launch {
+            val removed = try {
+                ruleLabels.remove(automation.id, label)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                false
+            }
+            if (!removed) {
+                mutableEvents.emit(
+                    DetailEvent.Message(
+                        language.pick("Unable to remove the label.", "Impossibile togliere l'etichetta."),
+                    ),
+                )
+            }
+        }
+    }
+
+    // --- 0.7.2: «Condividi» ------------------------------------------------------------------------
+
+    /**
+     * Apre il foglio «Condividi regola» con i due testi della regola mostrata (senza dati personali e integrale).
+     * Una bozza non si condivide; una regola troppo grande per il file di backup lo dice.
+     */
+    fun onShare() {
+        val automation = displayedAutomation?.takeIf { displayedDraft == null } ?: return
+        val service = sharing ?: return
+        viewModelScope.launch {
+            val texts = try {
+                withContext(Dispatchers.Default) { service.texts(automation) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (texts == null) {
+                message(shareUnavailableText(language))
+                return@launch
+            }
+            shareTexts.value = RuleShareUi(
+                ruleName = automation.name,
+                stripped = RuleShareText(texts.stripped.text, texts.stripped.compactText),
+                full = RuleShareText(texts.full.text, texts.full.compactText),
+                fileName = RulesBackupFormat.shareFileName(automation.name),
+            )
+            mutableState.update { it.withLiveExtras() }
+        }
+    }
+
+    fun onDismissShare() {
+        shareTexts.value = null
+        mutableState.update { it.withLiveExtras() }
+    }
+
+    /** Il testo da condividere, copiare o salvare dal foglio aperto; `null` se il foglio è chiuso. */
+    fun shareText(stripPersonalData: Boolean): String? = shareTexts.value?.text(stripPersonalData)?.text
+
+    /** Nome proposto da «Salva file»; `null` se il foglio è chiuso. */
+    fun shareFileName(): String? = shareTexts.value?.fileName
+
+    /** «Salva file»: scrive il testo scelto nel documento indicato dall'utente. [destination] null = annullato. */
+    fun onSaveShareFile(destination: Uri?, stripPersonalData: Boolean) {
+        if (destination == null) return
+        val text = shareText(stripPersonalData) ?: return
+        val service = sharing ?: return
+        viewModelScope.launch {
+            val saved = service.save(destination, text)
+            message(
+                if (saved) {
+                    language.pick("Rule saved to the file.", "Regola salvata nel file.")
+                } else {
+                    language.pick("Unable to write the file.", "Impossibile scrivere il file.")
+                },
+            )
+        }
+    }
+
+    private fun shareUnavailableText(l: RenderLanguage) = l.pick(
+        "This rule cannot be shared: it is not readable or it is too large for a file.",
+        "Questa regola non si può condividere: non è leggibile o è troppo grande per un file.",
+    )
 
     private fun batteryExempt(): Boolean {
         val app = context ?: return true
@@ -1108,13 +1389,52 @@ class AutomationDetailViewModel @Inject constructor(
         }
         .toList()
 
-    private fun generativeEstimate(generative: Boolean, language: RenderLanguage): String? = if (generative) {
-        language.pick(
-            "Minimum cooldown 60 s between two AI replies",
-            "Cooldown minimo 60 s tra due risposte AI",
-        )
-    } else {
-        null
+    /**
+     * Nota di costo in approvazione (S10): il caso peggiore di chiamate AI a ogni scatto, non solo il
+     * cooldown. Un `while` moltiplica le chiamate del suo corpo; un programma si ferma comunque al
+     * tetto [ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION].
+     */
+    private fun generativeEstimate(
+        actions: List<Action>,
+        program: Boolean,
+        language: RenderLanguage,
+    ): String? {
+        val worst = worstCaseAiCalls(actions)
+        if (worst <= 0L) return null
+        val calls = if (program) {
+            worst.coerceAtMost(ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION.toLong())
+        } else {
+            worst
+        }
+        return if (calls == 1L) {
+            language.pick(
+                "At most 1 AI call each time it runs; minimum cooldown 60 s between two runs",
+                "Al massimo 1 chiamata AI a ogni esecuzione; cooldown minimo 60 s tra due esecuzioni",
+            )
+        } else {
+            language.pick(
+                "At most $calls AI calls each time it runs; minimum cooldown 60 s between two runs",
+                "Al massimo $calls chiamate AI a ogni esecuzione; cooldown minimo 60 s tra due esecuzioni",
+            )
+        }
+    }
+
+    /** Chiamate AI nel percorso più costoso: rami dell'if al massimo, corpo del while per le iterazioni. */
+    private fun worstCaseAiCalls(actions: List<Action>): Long = actions.fold(0L) { total, action ->
+        val calls = when (action) {
+            is Action.If -> maxOf(worstCaseAiCalls(action.then), worstCaseAiCalls(action.orElse))
+            is Action.While -> worstCaseAiCalls(action.body) *
+                (action.maxIterations?.toLong() ?: AiCallBounds.WHILE_ITERATIONS)
+            else -> if (action.tier == ActionTier.GENERATIVE) 1L else 0L
+        }
+        (total + calls).coerceAtMost(AiCallBounds.CEILING)
+    }
+
+    private object AiCallBounds {
+        /** Un conteggio da variabile vale fino al tetto del validatore (1000 giri). */
+        const val WHILE_ITERATIONS = 1_000L
+        /** Solo contro l'overflow: la nota mostra comunque il tetto del programma. */
+        const val CEILING = 1_000_000L
     }
 
     private fun readerProbeLabel(

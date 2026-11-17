@@ -51,6 +51,7 @@ BASE_GRANTS = [
     f"pm grant {PACKAGE} android.permission.READ_PHONE_STATE",
     f"pm grant {PACKAGE} android.permission.READ_CALL_LOG",
     f"pm grant {PACKAGE} android.permission.BLUETOOTH_CONNECT",
+    f"pm grant {PACKAGE} android.permission.READ_CALENDAR",
     f"pm grant {PACKAGE} android.permission.ACTIVITY_RECOGNITION",
     f"appops set {PACKAGE} SCHEDULE_EXACT_ALARM allow",
     f"appops set {PACKAGE} WRITE_SETTINGS allow",
@@ -247,7 +248,8 @@ class Needs:
 
 
 def action_types(rec: dict) -> List[str]:
-    return sorted({a["type"] for a in pairwise._walk_actions(rec["rule"].get("actions", []))})
+    # 0.8: anche le azioni di fine di una regola-intervallo.
+    return sorted({a["type"] for a in pairwise.rule_actions(rec["rule"])})
 
 
 def run_rule(emu: Emulator, rec: dict, config: str, needs: Needs, verbose: bool, run_id: str) -> Result:

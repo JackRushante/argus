@@ -1,10 +1,13 @@
 package dev.argus.automation.connectivity
 
 import dev.argus.automation.triggers.DeviceEventDemand
+import dev.argus.automation.triggers.AppUsageWatch
 import dev.argus.automation.triggers.deviceEventSource
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTrigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
@@ -81,15 +84,28 @@ class ConnectivitySentinelCoordinator(
         val armed = store.armed()
         // Prima di avviare il servizio: alla creazione legge già la domanda corrente.
         // Prima dei package: chi registra la sorgente app legge già l'insieme aggiornato.
+        // 0.8: ogni sorgente ascolta anche i trigger di fine delle regole-intervallo.
         deviceEvents.updateAppPackages(
-            armed.mapNotNullTo(linkedSetOf()) { (it.trigger as? Trigger.AppEvent)?.pkg },
+            armed.flatMapTo(linkedSetOf()) { rule -> rule.listenedTriggers.mapNotNull { (it as? Trigger.AppEvent)?.pkg } },
         )
-        deviceEvents.update(armed.mapNotNullTo(linkedSetOf()) { it.trigger.deviceEventSource() })
+        // 0.8: regole app_usage con la loro impronta (il giorno dello scatto è legato alla revisione). Una regola ha
+        // al più un app_usage, d'inizio o di fine (validator).
+        deviceEvents.updateAppUsage(
+            armed.mapNotNull { automation ->
+                val trigger = automation.listenedTrigger<Trigger.AppUsage>() ?: return@mapNotNull null
+                val fingerprint = automation.approvalFingerprint ?: return@mapNotNull null
+                AppUsageWatch(automation.id, fingerprint, trigger.pkg, trigger.minutes)
+            },
+        )
+        deviceEvents.update(
+            armed.flatMapTo(linkedSetOf()) { rule -> rule.listenedTriggers.mapNotNull { it.deviceEventSource() } },
+        )
         val required = armed
             .filter { automation ->
-                val medium = (automation.trigger as? Trigger.Connectivity)?.medium
-                medium == ConnMedium.WIFI || medium == ConnMedium.POWER ||
-                    automation.trigger.deviceEventSource() != null
+                automation.listenedTriggers.any { trigger ->
+                    val medium = (trigger as? Trigger.Connectivity)?.medium
+                    medium == ConnMedium.WIFI || medium == ConnMedium.POWER || trigger.deviceEventSource() != null
+                }
             }
             .map { it.id }
             .sortedBy { it.value }

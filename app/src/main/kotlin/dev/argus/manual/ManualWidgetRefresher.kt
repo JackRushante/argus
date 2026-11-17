@@ -5,6 +5,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.argus.automation.di.ApplicationScope
 import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.automation.manual.ManualRuleCatalog
+import dev.argus.data.RoomUserModeStore
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
@@ -23,6 +24,7 @@ class ManualWidgetRefresher @Inject constructor(
     @ApplicationContext private val context: Context,
     private val store: AutomationStore,
     private val pause: AutomationPauseStore,
+    private val modes: RoomUserModeStore,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     private val started = AtomicBoolean(false)
@@ -35,7 +37,9 @@ class ManualWidgetRefresher @Inject constructor(
                     rules.filter { ManualRuleCatalog.isRunnableManual(it) }.map { it.id.value to it.name }.toSet()
                 }
                 .distinctUntilChanged()
-            combine(manualRules, pause.paused) { _, _ -> }
+            // 0.8: anche l'elenco delle modalità e quella attiva (righe modalità del widget).
+            val modeRows = modes.observe().map { it.modes to it.active }.distinctUntilChanged()
+            combine(manualRules, pause.paused, modeRows) { _, _, _ -> }
                 .collect { runCatching { ManualWidgetProvider.refreshAll(context) } }
         }
     }
