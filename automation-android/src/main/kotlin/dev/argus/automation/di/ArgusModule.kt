@@ -1704,6 +1704,7 @@ object ArgusModule {
         foregroundLauncher: ReceiverWorkLauncher,
         calendar: CalendarTriggerRuntime,
         exitTimeAlarms: SpanExitTimeAlarms,
+        handover: BeforeUnlockHandover,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1718,6 +1719,7 @@ object ArgusModule {
         foregroundLauncher,
         calendar,
         exitTimeAlarms = exitTimeAlarms.coordinator,
+        beforeTimeReconcile = handover::ensureImported,
     )
 
     /**

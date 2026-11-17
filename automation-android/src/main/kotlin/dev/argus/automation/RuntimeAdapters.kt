@@ -392,6 +392,8 @@ class AndroidArmedAutomationRegistrar(
     private val calendar: CalendarTriggerRuntime = NoopCalendarTriggerRuntime,
     /** 0.8: le sveglie di fine delle regole-intervallo (orario o prossima sveglia come trigger di fine). */
     private val exitTimeAlarms: TimeAlarmCoordinator? = null,
+    /** 0.8: before the coordinator may recover a due alarm, what the rules did before the first unlock is in the Log. */
+    private val beforeTimeReconcile: suspend () -> Unit = {},
 ) : ArmedAutomationRegistrar {
     /**
      * 0.8: una regola-intervallo è armata solo se anche la sua FINE è registrata: un intervallo che non può finire
@@ -446,6 +448,7 @@ class AndroidArmedAutomationRegistrar(
 
     /** Orari e prossima sveglia: i due coordinatori (inizio e fine) si riallineano insieme. */
     private suspend fun registerTime(automation: Automation): Boolean = try {
+        beforeTimeReconcile()
         val report = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
         val exitReport = exitTimeAlarms?.reconcile(ReconcileReason.CAPABILITY_CHANGED)
         val persisted = store.get(automation.id)
