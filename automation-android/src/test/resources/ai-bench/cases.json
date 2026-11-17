@@ -502,6 +502,70 @@
   }
  },
  {
+  "id": "action.notifreply.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Quando Luca mi scrive su Telegram rispondi con il testo esatto 'Sono in macchina, ti richiamo io'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "notification", "pkg": "org.telegram.messenger", "isGroup": false},
+   "contact": "Luca",
+   "actions_include": ["notification_reply"],
+   "actions_exclude": ["whatsapp_reply", "invoke_llm", "invoke_llm_v2"],
+   "actions_text": ["macchina"]
+  }
+ },
+ {
+  "id": "action.notifreply.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "When Luca writes to me on Telegram, reply automatically with exactly 'I am at the gym, talk later'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "notification", "pkg": "org.telegram.messenger", "isGroup": false},
+   "contact": "Luca",
+   "actions_include": ["notification_reply"],
+   "actions_exclude": ["whatsapp_reply", "invoke_llm", "invoke_llm_v2"],
+   "actions_text": ["gym"]
+  }
+ },
+ {
+  "id": "action.notifaction.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Quando arriva una notifica di Gmail con 'newsletter' nel titolo, chiudila subito",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "notification", "pkg": "com.google.android.gm", "titleMatch": {"contains": "newsletter"}},
+   "actions_include": ["notification_action"],
+   "params": {"notification_action.op": "DISMISS"}
+  }
+ },
+ {
+  "id": "action.notifaction.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "When Instagram sends me a notification, snooze it for 30 minutes",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "notification", "pkg": "com.instagram.android"},
+   "actions_include": ["notification_action"],
+   "params": {"notification_action.op": "SNOOZE", "notification_action.snoozeMinutes": 30}
+  }
+ },
+ {
+  "id": "action.notifaction.en.02",
+  "category": "action",
+  "lang": "en",
+  "text": "When a Gmail notification has 'receipt' in the title, press its 'Archive' button",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "notification", "pkg": "com.google.android.gm", "titleMatch": {"contains": "receipt"}},
+   "actions_include": ["notification_action"],
+   "params": {"notification_action.op": "CLICK", "notification_action.label": "Archive"}
+  }
+ },
+ {
   "id": "geo.exit.it.01",
   "category": "trigger.geofence",
   "lang": "it",
@@ -2610,5 +2674,82 @@
    "reply_mentions": ["simple"]
   },
   "note": "Come app70.twocalc.it.01, in inglese"
+ },
+ {
+  "id": "stored80.coffee.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Fammi un pulsante che conta i caffè di oggi",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_stored"],
+   "params": {"set_stored.op": "INCREMENT"}
+  },
+  "note": "Un contatore che resta fra un tocco e l'altro: set_stored INCREMENT su una chiave"
+ },
+ {
+  "id": "stored80.gym.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "When I connect to the gym Wi-Fi, remember today as my last gym day",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "trigger": {"type": "connectivity", "medium": "WIFI", "state": "CONNECTED"},
+   "actions_include": ["set_stored"],
+   "params": {"set_stored.op": "SET"}
+  },
+  "note": "Un valore scritto da una regola e conservato fra le esecuzioni"
+ },
+ {
+  "id": "mode80.home.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Quando arrivo a casa metti la modalità Casa",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "trigger": {"type": "geofence"},
+   "actions_include": ["set_user_mode"],
+   "params": {"set_user_mode.mode": {"contains": "Casa"}}
+  },
+  "note": "La modalità è un letterale dell'elenco dell'utente"
+ },
+ {
+  "id": "mode80.work.en.01",
+  "category": "trigger.manual",
+  "lang": "en",
+  "text": "Add a home screen button that switches to Work mode",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_user_mode"],
+   "params": {"set_user_mode.mode": {"contains": "Work"}}
+  },
+  "note": "Cambio di modalità da un pulsante"
+ },
+ {
+  "id": "ask08.it.01",
+  "category": "p4",
+  "lang": "it",
+  "text": "Ogni sera alle 22 chiedimi se domani lavoro, con i pulsanti Sì e No: se rispondo Sì metti una sveglia alle 7",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}},
+   "actions_include": ["ask", "set_alarm"],
+   "control_flow": ["if"]
+  },
+  "note": "0.8: la domanda con pulsanti cattura la scelta e la regola ci ramifica sopra con var_compare"
+ },
+ {
+  "id": "ask08.en.01",
+  "category": "p4",
+  "lang": "en",
+  "text": "When I tap the shortcut, ask me Coffee or Tea with two buttons and show a notification with my answer",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["ask", "show_notification"]
+  },
+  "note": "Come ask08.it.01, in inglese, senza ramo: la scelta va nel testo della notifica"
  }
 ]

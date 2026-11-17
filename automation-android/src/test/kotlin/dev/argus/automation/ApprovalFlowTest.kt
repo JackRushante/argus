@@ -20,6 +20,8 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.HttpMethod
+import dev.argus.engine.model.SecretRef
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Condition
@@ -658,6 +660,54 @@ class ApprovalFlowTest {
         assertEquals(query.canonicalId, review.verifiedStateQueries.single().queryId)
     }
 
+    // --- 0.8: un segreto che la cassaforte non ha blocca l'arm ---------------------------------------
+
+    private fun secretsDraft() = AutomationDraft(
+        name = "Home Assistant",
+        trigger = Trigger.Manual,
+        actions = listOf(
+            Action.HttpRequest(
+                HttpMethod.GET,
+                "https://ha.example.org/api/states",
+                secretHeaders = listOf(SecretRef("Authorization", "ha_token", "Bearer ")),
+                secretQuery = listOf(SecretRef("k", "other_key")),
+            ),
+        ),
+    )
+
+    @Test
+    fun `a rule naming a secret that is not saved cannot be armed and the issue names it`() = runTest {
+        val draft = secretsDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture(CapabilityRequirements.derive(draft.trigger, draft.actions), savedSecrets = { setOf("ha_token") })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        val issue = review.draft.issues.single { it.code == "secret_missing" }
+        assertEquals(Severity.ERROR, issue.severity)
+        assertEquals("other_key", issue.detail)
+        assertFalse(review.canArm)
+    }
+
+    @Test
+    fun `a rule whose secrets are all saved is armable, and an unreadable vault fails closed`() = runTest {
+        val draft = secretsDraft()
+        val available = CapabilityRequirements.derive(draft.trigger, draft.actions)
+        val ok = assertIs<DraftSubmissionResult.Ready>(
+            fixture(available, savedSecrets = { setOf("ha_token", "other_key") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(ok.draft.issues.none { it.code == "secret_missing" }, ok.draft.issues.toString())
+        assertTrue(ok.canArm)
+
+        val broken = assertIs<DraftSubmissionResult.Ready>(
+            fixture(available, savedSecrets = { error("keystore") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertEquals(
+            listOf("ha_token", "other_key"),
+            broken.draft.issues.filter { it.code == "secret_missing" }.map { it.detail },
+        )
+    }
+
     // --- 0.7.0: avviso «app non installata» (controllo fatto sul telefono) ---------------------------
 
     private fun appsDraft(
@@ -848,6 +898,59 @@ class ApprovalFlowTest {
         val recent = fixture(available = nfcCapabilities, nfcScansVerifiable = true)
         val clean = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", shell, null))).review
         assertFalse(clean.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+    // --- 0.8: le modalità nominate da una regola devono esistere sul telefono --------------------------
+
+    private fun modesDraft() = AutomationDraft(
+        name = "Arrivo a casa",
+        trigger = Trigger.UserModeChanged("Lavoro"),
+        conditions = Condition.Not(Condition.UserModeIs("notte")),
+        actions = listOf(Action.SetUserMode("casa")),
+    )
+
+    private fun modesFixture(draft: AutomationDraft, names: UserModeNames) = fixture(
+        available = CapabilityRequirements.derive(draft),
+        userModes = names,
+    )
+
+    @Test
+    fun `a rule that names a mode that does not exist cannot be armed, one error per missing name`() = runTest {
+        val draft = modesDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { listOf("lavoro") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        val missing = review.draft.issues.filter { it.code == "user_mode_unknown" }
+        assertEquals(listOf("notte", "casa"), missing.map { it.detail })
+        assertTrue(missing.all { it.severity == Severity.ERROR })
+        assertFalse(review.canArm)
+    }
+
+    @Test
+    fun `existing modes match ignoring case and an unreadable list fails closed`() = runTest {
+        val draft = modesDraft()
+        val ok = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { listOf("LAVORO", "Notte", "CASA") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(ok.draft.issues.none { it.code.startsWith("user_mode") }, "${ok.draft.issues}")
+        assertTrue(ok.canArm, "${ok.draft.issues}")
+
+        val unreadable = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { error("db") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertEquals(Severity.ERROR, unreadable.draft.issues.single { it.code == "user_mode_unavailable" }.severity)
+        assertFalse(unreadable.canArm)
+    }
+
+    @Test
+    fun `a rule without modes never reads the mode list`() = runTest {
+        val draft = appsDraft(actions = listOf(Action.SetWifi(false)))
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture(
+                available = CapabilityRequirements.derive(draft.trigger, draft.actions),
+                userModes = UserModeNames { error("non va letta") },
+            ).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(review.draft.issues.none { it.code.startsWith("user_mode") })
     }
 
     private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(
@@ -868,6 +971,8 @@ class ApprovalFlowTest {
         installedPackages: InstalledPackageCheck = AssumeAllInstalled,
         nfcTags: NfcTagReader = NoNfcTagReader,
         nfcScansVerifiable: Boolean = true,
+        userModes: UserModeNames = UserModeNames { emptyList() },
+        savedSecrets: suspend () -> Set<String> = { emptySet() },
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
@@ -897,6 +1002,8 @@ class ApprovalFlowTest {
             installedPackages = installedPackages,
             nfcTags = nfcTags,
             nfcScansVerifiable = { nfcScansVerifiable },
+            userModes = userModes,
+            savedSecrets = savedSecrets,
         )
         return Fixture(flow, store, repository, audit)
     }

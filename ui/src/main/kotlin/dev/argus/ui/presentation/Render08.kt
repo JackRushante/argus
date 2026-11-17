@@ -176,9 +176,10 @@ internal object RuleSpanRender {
 
     fun confirmLine(confirm: ConfirmSpec, l: RenderLanguage): String {
         val timeout = RuleRenderMapper.humanizeDuration(confirm.timeoutMs, l)
+        // 0.8: il testo approvato è questo (Run/Esegui o Annulla in una notifica; senza risposta non esegue).
         return l.pick(
-            "Before running, it asks you with a notification (Run / Cancel); with no answer within $timeout it does not run",
-            "Prima di eseguire ti chiede conferma con una notifica (Esegui / Annulla); senza risposta entro $timeout non esegue",
+            "Asks for confirmation before running (within $timeout)",
+            "Chiede conferma prima di eseguire (entro $timeout)",
         )
     }
 

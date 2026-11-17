@@ -450,7 +450,7 @@ class AgentMessageSupportTest {
 
         assertTrue("captureAs" in prompt, "captureAs deve essere descritto")
         assertTrue(
-            "ONLY on run_shell and invoke_llm" in prompt,
+            "ONLY on run_shell, invoke_llm and http_request" in prompt,
             "captureAs è ammesso solo sui producer con trasporto P4 risolto",
         )
     }

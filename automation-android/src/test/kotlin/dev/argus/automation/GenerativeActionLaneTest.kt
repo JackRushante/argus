@@ -898,6 +898,50 @@ class GenerativeActionLaneTest {
         assertTrue(fixture.notifier.calls.isEmpty())
     }
 
+    // --- 0.8 invoke_llm.output: risposta vincolata, ricontrollata, un solo nuovo tentativo ----------
+
+    private suspend fun kotlinx.coroutines.test.TestScope.constrained(
+        spec: dev.argus.engine.model.OutputSpec,
+        answers: List<String>,
+    ): Pair<ActResult, FakeBrain> {
+        val action = captureOnlyAction().copy(output = spec)
+        val automation = approvedAutomation(action, Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"))
+        val event = TriggerEvent.TimeFired(automation.id, requireNotNull(automation.approvalFingerprint))
+        val queue = ArrayDeque(answers)
+        val fixture = fixture(
+            action = action,
+            automation = automation,
+            context = context(automation, action, event = event),
+            act = { ActResult(queue.removeFirst(), null) },
+        )
+        return fixture.lane.submitAndAwait(fixture.context, action, emptyList()) to fixture.brain
+    }
+
+    @Test
+    fun `a constrained answer is normalised and the shape instruction reaches the model`() = runTest {
+        val (result, brain) = constrained(
+            dev.argus.engine.model.OutputSpec(dev.argus.engine.model.OutputKind.BOOLEAN),
+            listOf(" yes\n"),
+        )
+
+        assertEquals("true", result.text)
+        assertEquals(1, brain.calls)
+        assertTrue(brain.lastGoal.orEmpty().endsWith("Answer with exactly yes or no and nothing else."))
+    }
+
+    @Test
+    fun `free text gets one retry, then a closed failure`() = runTest {
+        val spec = dev.argus.engine.model.OutputSpec(dev.argus.engine.model.OutputKind.NUMBER, min = 1, max = 5)
+        val (retried, retriedBrain) = constrained(spec, listOf("about four", "4"))
+        assertEquals("4", retried.text)
+        assertEquals(2, retriedBrain.calls)
+
+        val (failed, failedBrain) = constrained(spec, listOf("about four", "9"))
+        assertEquals(null, failed.text)
+        assertEquals(dev.argus.engine.model.LlmOutputPolicy.OUTPUT_INVALID, failed.metaError)
+        assertEquals(2, failedBrain.calls)
+    }
+
     /** Il binding runtime non espone mai il valore RAW in toString (nessun leak nei log/journal). */
     @Test
     fun `resolved runtime binding redacts the value in toString`() = runTest {
@@ -1226,6 +1270,7 @@ class GenerativeActionLaneTest {
     ) : Brain {
         var calls = 0
         var lastContext: FireContext? = null
+        var lastGoal: String? = null
         var lastV2: Action.InvokeLlmV2? = null
         var resolvedCalls = 0
         var lastResolvedGoal: String? = null
@@ -1245,6 +1290,7 @@ class GenerativeActionLaneTest {
         ): ActResult {
             calls++
             lastContext = context
+            lastGoal = goal
             return actResult()
         }
 

@@ -9,13 +9,8 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
-import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntentKind
-import dev.argus.engine.model.NotificationActionOp
-import dev.argus.engine.model.OutputKind
-import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.ScreenCallOp
-import dev.argus.engine.model.StoredOp
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -77,20 +72,14 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newActionTypes = setOf(
-        ActionTypeIds.ASK,
-        ActionTypeIds.SET_STORED,
-        ActionTypeIds.SET_USER_MODE,
-        ActionTypeIds.NOTIFICATION_REPLY,
-        ActionTypeIds.NOTIFICATION_ACTION,
         ActionTypeIds.SEND_SMS,
         ActionTypeIds.CALL_NUMBER,
         ActionTypeIds.SEND_INTENT,
         ActionTypeIds.SCREEN_CALL,
     )
 
-    private val newTriggers = setOf(
-        "calendar_event", "user_mode_changed",
-    )
+    /** Tutti i trigger 0.8 sono accesi: l'insieme resta per chi ne aggiungerà altri spenti. */
+    private val newTriggers = emptySet<String>()
 
     @Test
     fun `nothing new is announced to the model, not even as unavailable`() = runTest {
@@ -140,17 +129,10 @@ class AndroidCapabilityProbeScaffold08Test {
             shizukuReady = { true },
         )
         val actions = listOf(
-            Action.Ask("?", listOf("a"), "answer"),
-            Action.SetStored("k", StoredOp.CLEAR),
-            Action.SetUserMode("lavoro"),
-            Action.NotificationReply("ok"),
-            Action.NotificationAction(NotificationActionOp.DISMISS),
             Action.SendSms("+393331112222", "ok"),
             Action.CallNumber("+393331112222"),
             Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
             Action.ScreenCall(ScreenCallOp.REJECT),
-            Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
-            Action.InvokeLlm("g", emptyList(), emptyList(), false, output = OutputSpec(OutputKind.BOOLEAN)),
         )
         actions.forEach { action ->
             assertEquals(ActionResult.Failure("not_available_yet"), executor.execute(action, context), "$action")

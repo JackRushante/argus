@@ -172,6 +172,41 @@ internal object LogReasonLabels {
             "il server ha rimandato a un altro indirizzo",
         ),
         "http_too_many_redirects" to Label("too many redirects", "troppi reindirizzamenti"),
+        // --- 0.8: risposta catturata e segreti della cassaforte (mai il valore, mai il nome) ---
+        "http_cleartext_secret" to Label(
+            "a secret cannot travel unencrypted",
+            "un segreto non può viaggiare senza cifratura",
+        ),
+        "http_secret_missing" to Label(
+            "a secret the rule uses is no longer saved",
+            "un segreto usato dalla regola non è più salvato",
+        ),
+        "http_secret_invalid" to Label(
+            "a secret cannot be sent in a header (only plain ASCII characters)",
+            "un segreto non si può inviare in un'intestazione (solo caratteri ASCII semplici)",
+        ),
+        "http_capture_not_json" to Label("the response is not JSON", "la risposta non è JSON"),
+        "http_capture_path_missing" to Label(
+            "the response has nothing at the requested path",
+            "la risposta non ha nulla nel percorso richiesto",
+        ),
+        "http_capture_not_scalar" to Label(
+            "the requested part of the response is not a text, a number or yes/no",
+            "la parte richiesta della risposta non è un testo, un numero o sì/no",
+        ),
+        "http_capture_too_long" to Label(
+            "the response to keep is over 4096 characters",
+            "la risposta da conservare supera 4096 caratteri",
+        ),
+        "http_capture_invalid_chars" to Label(
+            "the response contains control characters",
+            "la risposta contiene caratteri di controllo",
+        ),
+        "http_capture_response_too_large" to Label(
+            "the response is over 64 KB",
+            "la risposta supera 64 KB",
+        ),
+        "secret_deleted" to Label("a secret it uses was deleted", "un segreto che usa è stato eliminato"),
         "json_quote_context" to Label(
             "external data in a JSON body must sit inside a quoted string",
             "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",
@@ -222,6 +257,79 @@ internal object LogReasonLabels {
         "not_available_yet" to Label(
             "this is not available in this version",
             "non disponibile in questa versione",
+        ),
+        // --- 0.8: valori conservati e modalità ---
+        "stored_type_mismatch" to Label(
+            "the saved variable has a different type",
+            "la variabile salvata è di un altro tipo",
+        ),
+        "stored_value_invalid" to Label(
+            "the value to save is not valid (too long or not a number)",
+            "il valore da salvare non è valido (troppo lungo o non numerico)",
+        ),
+        "stored_key_limit" to Label(
+            "there are already 64 saved variables",
+            "ci sono già 64 variabili salvate",
+        ),
+        "stored_key_invalid" to Label("the variable name is not valid", "il nome della variabile non è valido"),
+        "stored_unavailable" to Label(
+            "the saved variables could not be read or written",
+            "non è stato possibile leggere o scrivere le variabili salvate",
+        ),
+        "stored_unresolved" to Label(
+            "the value to save was not prepared by the program",
+            "il valore da salvare non è stato preparato dal programma",
+        ),
+        "user_mode_unknown" to Label("the mode no longer exists", "la modalità non esiste più"),
+        "user_mode_unavailable" to Label(
+            "the modes could not be read or changed",
+            "non è stato possibile leggere o cambiare la modalità",
+        ),
+        "user_mode_renamed" to Label(
+            "a mode used by this rule was renamed",
+            "una modalità usata da questa regola è stata rinominata",
+        ),
+        "user_mode_deleted" to Label(
+            "a mode used by this rule was deleted",
+            "una modalità usata da questa regola è stata eliminata",
+        ),
+        // --- 0.8: «chiedimi prima di eseguire», domande con pulsanti, risposte AI vincolate ---
+        "confirmation_requested" to Label("waiting for your confirmation", "in attesa della tua conferma"),
+        "confirmation_pending" to Label(
+            "a confirmation for this rule is already waiting",
+            "c'è già una conferma in attesa per questa regola",
+        ),
+        "confirmation_unavailable" to Label(
+            "could not ask for confirmation (notifications are off)",
+            "impossibile chiedere conferma (notifiche spente)",
+        ),
+        "confirmation_cancelled" to Label("you cancelled it", "l'hai annullata"),
+        "confirmation_expired" to Label("no answer in time, not run", "nessuna risposta in tempo, non eseguita"),
+        "confirmation_stale" to Label(
+            "the rule changed or was switched off before you confirmed",
+            "la regola è cambiata o è stata spenta prima della conferma",
+        ),
+        "ask_timeout" to Label("no answer to the question in time", "nessuna risposta alla domanda in tempo"),
+        "ask_timeout_default" to Label("no answer, the default choice was used", "nessuna risposta, usata la scelta predefinita"),
+        "ask_unavailable" to Label("the question could not be asked", "la domanda non si è potuta porre"),
+        "ask_notification_unavailable" to Label(
+            "the question could not be shown (notifications are off)",
+            "la domanda non si è potuta mostrare (notifiche spente)",
+        ),
+        "ask_answer_invalid" to Label("the answer was not one of the choices", "la risposta non era una delle scelte"),
+        "ask_failed" to Label("the question failed", "la domanda non è riuscita"),
+        "ask_outside_program" to Label("a question can only run inside its rule", "una domanda funziona solo dentro la sua regola"),
+        "ask_resume_stale" to Label(
+            "the rule changed or was switched off before the answer, it did not go on",
+            "la regola è cambiata o è stata spenta prima della risposta, non è proseguita",
+        ),
+        "ask_resume_invalid" to Label(
+            "the saved question did not match the rule, it did not go on",
+            "la domanda salvata non corrispondeva alla regola, non è proseguita",
+        ),
+        "llm_output_invalid" to Label(
+            "the AI did not answer with one of the allowed answers",
+            "l'AI non ha risposto con una delle risposte ammesse",
         ),
         // --- 0.4.1: «Pausa automazioni» ---
         "paused" to Label(

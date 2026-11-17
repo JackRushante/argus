@@ -10,7 +10,7 @@ import android.os.Bundle
 import dev.argus.engine.notification.ParsedNotification
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
-import dev.argus.engine.safety.DraftValidator
+import dev.argus.engine.safety.ReplyChannels
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -158,9 +158,11 @@ class NotificationReplyHandleFactory {
         val event = parsed.envelope.event as? TriggerEvent.NotificationPosted ?: return null
         // I trigger Notification generici non hanno bisogno di un canale di reply: conservare
         // handle RemoteInput solo per i package che il gateway potrà davvero usare.
-        if (event.pkg !in DraftValidator.WHATSAPP_PACKAGES) return null
+        // 0.8: anche Telegram, Signal e Google Messaggi, solo con lo shortcut di conversazione dell'app.
+        if (!ReplyChannels.isReplyPackage(event.pkg)) return null
         val key = event.notificationKey?.takeIf(String::isNotBlank) ?: return null
         val conversationId = event.conversationId?.takeIf(String::isNotBlank) ?: return null
+        if (!ReplyChannels.isStableConversation(event.pkg, conversationId)) return null
         val candidate = notification.actions.orEmpty().asSequence().filterNotNull().mapNotNull { action ->
             val remoteInput = action.remoteInputs.orEmpty().asSequence().filterNotNull().firstOrNull {
                 it.allowFreeFormInput && it.resultKey?.isNotBlank() == true
@@ -188,7 +190,9 @@ class AndroidNotificationReplyGateway(
     private val appContext = context.applicationContext
 
     override fun send(request: NotificationReplyRequest): NotificationReplyDelivery {
-        if (request.packageName !in DraftValidator.WHATSAPP_PACKAGES) {
+        if (!ReplyChannels.isReplyPackage(request.packageName) ||
+            !ReplyChannels.isStableConversation(request.packageName, request.conversationId)
+        ) {
             return NotificationReplyDelivery.Failed("reply_package_untrusted")
         }
         if (!validMetadata(request) || !validText(request.text)) {

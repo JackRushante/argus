@@ -16,6 +16,7 @@ import dev.argus.data.dao.ExecutionJournalDao
 import dev.argus.data.dao.LabelDao
 import dev.argus.data.dao.ObservedConversationDao
 import dev.argus.data.dao.ScheduledTimeAlarmDao
+import dev.argus.data.dao.StoredStateDao
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.AuditEntity
@@ -26,6 +27,9 @@ import dev.argus.data.entities.FireClaimEntity
 import dev.argus.data.entities.PendingDraftEntity
 import dev.argus.data.entities.ObservedConversationEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
+import dev.argus.data.entities.StoredValueEntity
+import dev.argus.data.entities.UserModeEntity
+import dev.argus.data.entities.UserModeStateEntity
 import dev.argus.data.entities.UsageEventEntity
 import dev.argus.data.entities.WhitelistedContactEntity
 
@@ -42,8 +46,11 @@ import dev.argus.data.entities.WhitelistedContactEntity
         DeferredReplyEntity::class,
         UsageEventEntity::class,
         AutomationLabelEntity::class,
+        StoredValueEntity::class,
+        UserModeEntity::class,
+        UserModeStateEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -58,6 +65,7 @@ abstract class ArgusDatabase : RoomDatabase() {
     abstract fun deferredReplyDao(): DeferredReplyDao
     abstract fun usageDao(): UsageDao
     abstract fun labelDao(): LabelDao
+    abstract fun storedStateDao(): StoredStateDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -344,6 +352,50 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 0.8: valori conservati fra le esecuzioni e modalità dell'utente. Tre tabelle nuove, vuote: nessuna
+         * regola le usa finché non ne viene approvata una nuova, e nessun dato esistente cambia.
+         */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `stored_values` (
+                        `storedKey` TEXT NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `storedValue` TEXT NOT NULL,
+                        `integrity` TEXT NOT NULL,
+                        `confidentiality` TEXT NOT NULL,
+                        `writerRuleId` TEXT,
+                        `updatedAtMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`storedKey`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `user_modes` (
+                        `nameKey` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `position` INTEGER NOT NULL,
+                        PRIMARY KEY(`nameKey`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `user_mode_state` (
+                        `id` INTEGER NOT NULL,
+                        `activeKey` TEXT,
+                        `changedByRuleId` TEXT,
+                        `changedAtMillis` INTEGER,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
                 .addMigrations(
@@ -359,6 +411,7 @@ abstract class ArgusDatabase : RoomDatabase() {
                     MIGRATION_10_11,
                     MIGRATION_11_12,
                     MIGRATION_12_13,
+                    MIGRATION_13_14,
                 )
                 .build()
 

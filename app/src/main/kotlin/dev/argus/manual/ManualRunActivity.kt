@@ -8,6 +8,7 @@ import androidx.lifecycle.lifecycleScope
 import dev.argus.R
 import dev.argus.automation.manual.ManualIntents
 import dev.argus.automation.manual.ManualRunResult
+import dev.argus.automation.modes.ModeIntentResult
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -29,8 +30,28 @@ class ManualRunActivity : ComponentActivity() {
             finish()
             return
         }
-        val ruleId = request.getStringExtra(ManualIntents.EXTRA_RULE_ID)
         val token = request.getStringExtra(ManualIntents.EXTRA_TOKEN)
+        // 0.8: pulsante modalità del widget. Stesso trampolino e stessa disciplina: prima il token, poi il nome.
+        val mode = request.getStringExtra(ManualIntents.EXTRA_MODE)
+        if (mode != null) {
+            val modes = manualEntryPoint().modes()
+            lifecycleScope.launch {
+                try {
+                    when (modes.switchFromIntent(mode, token)) {
+                        ModeIntentResult.SWITCHED -> toast(getString(R.string.mode_toast_switched, mode))
+                        ModeIntentResult.UNCHANGED -> Unit
+                        ModeIntentResult.BAD_TOKEN,
+                        ModeIntentResult.UNKNOWN_MODE,
+                        ModeIntentResult.UNAVAILABLE,
+                        -> toast(getString(R.string.mode_toast_unavailable))
+                    }
+                } finally {
+                    finish()
+                }
+            }
+            return
+        }
+        val ruleId = request.getStringExtra(ManualIntents.EXTRA_RULE_ID)
         val runner = manualEntryPoint().runner()
         lifecycleScope.launch {
             try {

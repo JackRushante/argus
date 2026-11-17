@@ -15,9 +15,11 @@ import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.SecretPolicy
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.UserModePolicy
 import dev.argus.engine.model.stateComparisons
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -64,6 +66,11 @@ data class DeviceLocation(
     companion object {
         const val MAX_CONTRADICTION_FIX_AGE_MILLIS = 30_000L
     }
+}
+
+/** 0.8: i nomi delle modalità definite adesso (Room in produzione). */
+fun interface UserModeNames {
+    suspend fun names(): List<String>
 }
 
 fun interface CurrentLocationProvider {
@@ -139,6 +146,15 @@ class ApprovalFlow(
      * `nfc_tag` con shell o macro sullo schermo si arma con un avviso: quelle azioni non partiranno mai.
      */
     private val nfcScansVerifiable: () -> Boolean = { true },
+     * 0.8: i nomi delle modalità definite adesso. Una regola che ne nomina una che non esiste non si arma
+     * (ERROR `user_mode_unknown`). Default: nessuna modalità, quindi fail-closed.
+     */
+    private val userModes: UserModeNames = UserModeNames { emptyList() },
+    /**
+     * 0.8: i nomi dei segreti salvati nella cassaforte del telefono (mai i valori). Default: nessuno, quindi
+     * una regola che nomina un segreto non si arma finché il caller non cabla la cassaforte.
+     */
+    private val savedSecrets: suspend () -> Set<String> = { emptySet() },
 ) {
     suspend fun submit(compile: CompileResult): DraftSubmissionResult {
         return persistCompile(
@@ -251,7 +267,7 @@ class ApprovalFlow(
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
         val appIssues = missingAppIssues(base.snapshot) + systemFreezeIssues(base.snapshot) +
-            unverifiableNfcIssues(base.snapshot)
+            unverifiableNfcIssues(base.snapshot) + userModeIssues(base.snapshot) + missingSecretIssues(base.snapshot)
         val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
             StateQueryProbeReport()
         } else {
@@ -470,6 +486,31 @@ class ApprovalFlow(
     }
 
     /**
+     * 0.8: una regola che nomina un segreto non salvato non può funzionare: ERROR `secret_missing` col nome
+     * in `detail`, uno per nome, quindi non si arma. Se la cassaforte non si legge, fallisce chiusa: ogni
+     * nome è dato per mancante.
+     */
+    private suspend fun missingSecretIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val used = SecretPolicy.namesUsedBy(snapshot.draft)
+        if (used.isEmpty()) return emptyList()
+        val saved = try {
+            savedSecrets()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptySet()
+        }
+        return used.filter { it !in saved }.map { name ->
+            ValidationIssue(
+                Severity.ERROR,
+                "secret_missing",
+                "Segreto non salvato su questo telefono: $name",
+                detail = name,
+            )
+        }
+    }
+
+    /**
      * 0.7.2: congelare un'app di sistema (preinstallata) può togliere al telefono qualcosa che gli serve, ma
      * è anche il modo legittimo di spegnere le app superflue del produttore: WARNING
      * `app_control_freeze_system` con il package in `detail`, uno per package, mai un blocco. Se il
@@ -496,6 +537,34 @@ class ApprovalFlow(
                 detail = pkg,
             )
         }
+    }
+
+    /**
+     * 0.8: ogni modalità nominata dalla regola (trigger, condizioni, `set_user_mode`) deve esistere adesso,
+     * senza maiuscole. Una per nome mancante, con il nome in `detail`. Se l'elenco non si legge: ERROR anche lì.
+     */
+    private suspend fun userModeIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val used = UserModePolicy.modesUsedBy(snapshot.draft)
+        if (used.isEmpty()) return emptyList()
+        val existing = try {
+            userModes.names()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return listOf(
+                ValidationIssue(Severity.ERROR, "user_mode_unavailable", "Impossibile leggere l'elenco delle modalità"),
+            )
+        }
+        return used.filter { name -> existing.none { UserModePolicy.same(it, name) } }
+            .distinctBy(UserModePolicy::key)
+            .map { name ->
+                ValidationIssue(
+                    Severity.ERROR,
+                    "user_mode_unknown",
+                    "Modalità inesistente: $name",
+                    detail = name,
+                )
+            }
     }
 
     private suspend fun stateQueryReport(snapshot: PendingDraft): StateQueryProbeReport {

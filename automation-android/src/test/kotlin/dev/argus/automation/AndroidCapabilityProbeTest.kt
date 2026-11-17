@@ -714,6 +714,8 @@ class AndroidCapabilityProbeTest {
                 "immediate",
                 // 0.4.1: avvio manuale, sempre armabile.
                 "manual",
+                // 0.8: cambio di modalità, evento interno ad Argus.
+                "user_mode_changed",
                 "notification",
                 "phone_state.sms",
                 "connectivity.wifi",

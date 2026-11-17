@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MyLocation
@@ -47,6 +48,8 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,6 +83,7 @@ import dev.argus.engine.safety.Severity
 import dev.argus.ui.R
 import dev.argus.ui.components.ArgusButton
 import dev.argus.ui.components.ArgusCard
+import dev.argus.ui.components.ArgusListRow
 import dev.argus.ui.components.ArgusIconButton
 import dev.argus.ui.components.ArgusLargeTopBar
 import dev.argus.ui.components.BudgetLimitsDialog
@@ -208,6 +212,7 @@ fun SettingsScreen(
                 HealthSection(healthItems, needsFix, Modifier.sectionAnchor(SECTION_HEALTH))
                 PrivilegesSection(state.privileged, callbacks::onSetRootEnabled, callbacks::onGrantPermanent)
                 PauseSettingRow(state.automationsPaused, callbacks::onSetAutomationsPaused)
+                ModesEntryRow(callbacks::onOpenModes)
                 HealthAlertsSettingRow(state.healthAlertsEnabled, callbacks::onSetHealthAlertsEnabled)
                 BrainSection(
                     transport = state.transport,
@@ -220,6 +225,7 @@ fun SettingsScreen(
                 )
                 PrivacySection(state.privacyAccepted, { confirmPrivacyRevoke = true }, Modifier.sectionAnchor(SECTION_PRIVACY))
                 WhitelistSection(state.whitelist, callbacks, Modifier.sectionAnchor(SECTION_WHITELIST))
+                SecretsEntryRow(callbacks::onOpenSecrets)
                 BudgetSection(state.budget, callbacks, Modifier.sectionAnchor(SECTION_BUDGET))
                 RulesBackupSection(
                     state.backup,
@@ -470,6 +476,15 @@ private fun buildHealthItems(state: SettingsState, callbacks: SettingsCallbacks)
                 stringResource(if (state.bluetoothTriggerGranted) R.string.settings_bt_on else R.string.settings_bt_off),
                 okOrOptIn(state.bluetoothTriggerGranted), callbacks::onRequestBluetoothPermission,
                 actionLabel = enable.takeIf { !state.bluetoothTriggerGranted },
+            ),
+        )
+        // 0.8: calendario, stesso opt-in degli SMS: il tocco chiede READ_CALENDAR.
+        add(
+            HealthSpec(
+                Icons.Rounded.Event, stringResource(R.string.settings_calendar_title),
+                stringResource(if (state.calendarGranted) R.string.settings_calendar_on else R.string.settings_calendar_off),
+                okOrOptIn(state.calendarGranted), callbacks::onRequestCalendarPermission,
+                actionLabel = enable.takeIf { !state.calendarGranted },
             ),
         )
         if (state.connectivitySentinelActive) {
@@ -919,6 +934,35 @@ private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCall
     }
 }
 
+/** 0.8: la voce «Segreti» di Sistema, che apre la sua schermata. */
+@Composable
+private fun SecretsEntryRow(onOpen: () -> Unit) {
+    ArgusCard(contentPadding = PaddingValues(0.dp)) {
+        ArgusListRow(
+            title = stringResource(R.string.settings_secrets_title),
+            subtitle = stringResource(R.string.settings_secrets_subtitle),
+            leading = {
+                IconBadge(
+                    icon = Icons.Rounded.Key,
+                    container = MaterialTheme.colorScheme.primaryContainer,
+                    content = MaterialTheme.colorScheme.onPrimaryContainer,
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                )
+            },
+            trailing = {
+                Icon(
+                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            onClick = onOpen,
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+        )
+    }
+}
+
 @Composable
 private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
     Row(
@@ -938,7 +982,12 @@ private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
             )
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(contact.displayName, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+            // 0.8: la whitelist vale per (app, conversazione): l'app si vede accanto al nome.
+            Text(
+                contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+            )
             // conversationId MASCHERATO in monospace: non esporre il numero/handle completo.
             Row(
                 modifier = Modifier
@@ -1180,6 +1229,27 @@ private fun RerunRow(onRerun: () -> Unit) {
             )
             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         }
+    }
+}
+
+/** 0.8: riga che apre Sistema › Modalità (modalità attiva, elenco, variabili salvate). */
+@Composable
+private fun ModesEntryRow(onOpen: () -> Unit) {
+    ArgusCard(Modifier.fillMaxWidth().testTag("settings_modes"), contentPadding = PaddingValues(0.dp)) {
+        ArgusListRow(
+            title = stringResource(R.string.settings_modes_title),
+            subtitle = stringResource(R.string.settings_modes_subtitle),
+            onClick = onOpen,
+            trailing = {
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            },
+            contentPadding = PaddingValues(start = 14.dp, top = ArgusSpacing.Medium, bottom = ArgusSpacing.Medium),
+        )
     }
 }
 

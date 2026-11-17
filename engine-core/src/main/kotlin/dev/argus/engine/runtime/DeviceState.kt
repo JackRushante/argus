@@ -6,6 +6,8 @@ import dev.argus.engine.model.Condition
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.model.StoredValue
+import dev.argus.engine.model.UserModeSnapshot
 
 data class GeoPoint(val lat: Double, val lng: Double)
 
@@ -15,6 +17,12 @@ data class DeviceState(
     val location: GeoPoint? = null,
     /** Valori parametrici indicizzati solo dall'ID opaco della query approvata. */
     val queryValues: Map<String, String> = emptyMap(),
+    /** 0.8: connessioni e calendario delle condizioni di contesto, letti solo se chiesti. */
+    val facts: DeviceFacts = DeviceFacts(),
+    /** 0.8: valori conservati letti, per chiave. Una chiave assente è un valore assente (UNKNOWN). */
+    val stored: Map<String, StoredValue> = emptyMap(),
+    /** 0.8: modalità utente; null = non letta o non leggibile (UNKNOWN), mai «nessuna modalità». */
+    val userMode: UserModeSnapshot? = null,
 )
 
 /** Richiesta esplicita e minima allo snapshot provider per un singolo batch Engine. */
@@ -23,19 +31,29 @@ data class StateReadRequest(
     val includeForegroundApp: Boolean = false,
     val includeLocation: Boolean = false,
     val queries: Set<StateQuery> = emptySet(),
+    /** 0.8: letture delle condizioni di contesto ([DeviceFact]). */
+    val facts: Set<DeviceFact> = emptySet(),
+    /** 0.8: chiavi dei valori conservati da leggere. */
+    val storedKeys: Set<String> = emptySet(),
+    /** 0.8: leggere la modalità utente. */
+    val includeUserMode: Boolean = false,
 ) {
     init {
         require(keys.all(StateKeys.ALL::containsKey)) { "Chiave di stato fuori registry" }
     }
 
     val isEmpty: Boolean
-        get() = keys.isEmpty() && !includeForegroundApp && !includeLocation && queries.isEmpty()
+        get() = keys.isEmpty() && !includeForegroundApp && !includeLocation && queries.isEmpty() &&
+            facts.isEmpty() && storedKeys.isEmpty() && !includeUserMode
 
     operator fun plus(other: StateReadRequest): StateReadRequest = StateReadRequest(
         keys = keys + other.keys,
         includeForegroundApp = includeForegroundApp || other.includeForegroundApp,
         includeLocation = includeLocation || other.includeLocation,
         queries = queries + other.queries,
+        facts = facts + other.facts,
+        storedKeys = storedKeys + other.storedKeys,
+        includeUserMode = includeUserMode || other.includeUserMode,
     )
 
     fun missingFrom(known: StateReadRequest): StateReadRequest = StateReadRequest(
@@ -43,6 +61,9 @@ data class StateReadRequest(
         includeForegroundApp = includeForegroundApp && !known.includeForegroundApp,
         includeLocation = includeLocation && !known.includeLocation,
         queries = queries - known.queries,
+        facts = facts - known.facts,
+        storedKeys = storedKeys - known.storedKeys,
+        includeUserMode = includeUserMode && !known.includeUserMode,
     )
 
     fun project(state: DeviceState): DeviceState = DeviceState(
@@ -51,6 +72,9 @@ data class StateReadRequest(
         location = state.location.takeIf { includeLocation },
         queryValues = state.queryValues.filterKeys { id -> queries.any { it.canonicalId == id } }
             .toMap(),
+        facts = state.facts.project(facts),
+        stored = state.stored.filterKeys(storedKeys::contains).toMap(),
+        userMode = state.userMode.takeIf { includeUserMode },
     )
 
     companion object {
@@ -86,13 +110,17 @@ object StateReadPlanner {
         is Condition.Not -> forCondition(condition.cond)
         // 0.8 scaffold: nessuna lettura pianificata finché il tipo è spento (il valutatore dà UNKNOWN).
         // Chi lo implementa dichiara qui cosa legge (una chiave nuova del DeviceState o una query).
+        // weekday legge solo l'orologio del motore, come time_window.
         is Condition.Weekday -> StateReadRequest.EMPTY
-        is Condition.WifiConnected -> StateReadRequest.EMPTY
-        is Condition.BluetoothConnected -> StateReadRequest.EMPTY
-        is Condition.HeadsetConnected -> StateReadRequest.EMPTY
-        is Condition.CalendarBusy -> StateReadRequest.EMPTY
-        is Condition.StoredCompare -> StateReadRequest.EMPTY
-        is Condition.UserModeIs -> StateReadRequest.EMPTY
+        // Il nome della rete solo se la regola lo chiede: serve la posizione.
+        is Condition.WifiConnected -> StateReadRequest(
+            facts = if (condition.ssid == null) setOf(DeviceFact.WIFI) else setOf(DeviceFact.WIFI, DeviceFact.WIFI_SSID),
+        )
+        is Condition.BluetoothConnected -> StateReadRequest(facts = setOf(DeviceFact.BLUETOOTH))
+        is Condition.HeadsetConnected -> StateReadRequest(facts = setOf(DeviceFact.AUDIO_OUTPUTS))
+        is Condition.CalendarBusy -> StateReadRequest(facts = setOf(DeviceFact.CALENDAR_NOW))
+        is Condition.StoredCompare -> StateReadRequest(storedKeys = setOf(condition.key))
+        is Condition.UserModeIs -> StateReadRequest(includeUserMode = true)
     }
 
     fun forAction(action: Action): StateReadRequest = when (action) {

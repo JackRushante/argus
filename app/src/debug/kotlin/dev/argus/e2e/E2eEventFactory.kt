@@ -205,7 +205,10 @@ class E2eEventFactory(private val nowMillis: () -> Long = System::currentTimeMil
             "calendar_event" -> {
                 val phase = payload.enum<CalendarPhase>("phase")
                     ?: (own as? Trigger.CalendarEvent)?.phase ?: CalendarPhase.START
-                registered(automation, type, at) { TriggerEvent.CalendarEventFired(automation.id, phase, it) }
+                // Il titolo (payload TITLE) solo se il caso lo passa: la sorgente reale lo legge dal calendario.
+                registered(automation, type, at) {
+                    TriggerEvent.CalendarEventFired(automation.id, phase, it, title = payload.string("title"))
+                }
             }
 
             // 0.8: una scansione sintetica è non verificata (come un'app che forgia il tag), salvo

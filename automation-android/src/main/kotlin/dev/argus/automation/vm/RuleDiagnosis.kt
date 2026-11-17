@@ -218,6 +218,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The Argus Accessibility service is not turned on",
         "Il servizio di Accessibilità di Argus non è attivo",
     )
+    BlockCause.CALENDAR_PERMISSION -> l.pick(
+        "The calendar permission is missing: turn on \"Calendar rules\" in System",
+        "Manca il permesso del calendario: attiva \"Regole del calendario\" in Sistema",
+    )
     BlockCause.NOT_AVAILABLE_YET -> l.pick(
         "This is not available in this version",
         "Non disponibile in questa versione",

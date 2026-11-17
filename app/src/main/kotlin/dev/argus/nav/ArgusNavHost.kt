@@ -85,8 +85,11 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.automation.vm.SecretsEvent
+import dev.argus.automation.vm.SecretsViewModel
 import dev.argus.automation.vm.TemplateGalleryEvent
 import dev.argus.automation.vm.TemplateGalleryViewModel
+import dev.argus.automation.vm.ModesViewModel
 import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
@@ -104,6 +107,7 @@ import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.TemplateCategoryUi
+import dev.argus.ui.model.SecretsCallbacks
 import dev.argus.ui.model.TemplateGalleryCallbacks
 import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
@@ -112,7 +116,10 @@ import dev.argus.ui.screens.ChatScreen
 import dev.argus.ui.screens.ExecutionLogScreen
 import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
+import dev.argus.ui.screens.SecretsScreen
 import dev.argus.ui.screens.TemplateGalleryScreen
+import dev.argus.ui.screens.ModesScreen
+import dev.argus.ui.model.ModesCallbacks
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -125,6 +132,8 @@ private object Routes {
     const val DETAIL = "detail/{id}"
     const val ONBOARDING = "onboarding"
     const val TEMPLATES = "templates"
+    const val MODES = "modes"
+    const val SECRETS = "secrets"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
     fun detail(id: String): String = "detail/${Uri.encode(id)}"
@@ -232,6 +241,12 @@ fun ArgusNavHost() {
         showMessage = showMessage,
     )
     val requestBluetoothPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
+    // 0.8: READ_CALENDAR, chiesto solo dalla riga «Regole del calendario» per le regole che lo usano.
+    val requestCalendarPermission = rememberPermissionRequester(
         onResult = afterPermissionResult,
         openAppSettings = openAppDetailsSettings,
         showMessage = showMessage,
@@ -476,6 +491,52 @@ fun ArgusNavHost() {
                     )
                 }
 
+                // 0.8: System › Modes (modalità e variabili salvate).
+                composable(Routes.MODES) {
+                    val viewModel: ModesViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) { viewModel.messages.collect { showMessage(it) } }
+                    ModesScreen(
+                        state = state,
+                        callbacks = object : ModesCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onSwitchMode(name: String) = viewModel.onSwitchMode(name)
+                            override fun onAddMode(name: String) = viewModel.onAddMode(name)
+                            override fun onRenameMode(from: String, to: String) = viewModel.onRenameMode(from, to)
+                            override fun onDeleteMode(name: String) = viewModel.onDeleteMode(name)
+                            override fun onEditValue(key: String, value: String) = viewModel.onEditValue(key, value)
+                            override fun onDeleteValue(key: String) = viewModel.onDeleteValue(key)
+                        },
+                        modifier = Modifier.testTag("screen_modes"),
+                    )
+                }
+
+                // 0.8: System › Secrets. Nomi e conteggi soltanto: un valore va dal foglio alla cassaforte.
+                composable(Routes.SECRETS) {
+                    val viewModel: SecretsViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is SecretsEvent.Message -> showMessage(event.text)
+                            }
+                        }
+                    }
+                    SecretsScreen(
+                        state = state,
+                        callbacks = object : SecretsCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onSave(name: String, value: String) = viewModel.onSave(name, value)
+                            override fun onDelete(name: String) = viewModel.onDelete(name)
+                        },
+                        modifier = Modifier.testTag("screen_secrets"),
+                    )
+                }
+
                 composable(
                     route = Routes.LOG_PATTERN,
                     arguments = listOf(
@@ -631,6 +692,9 @@ fun ArgusNavHost() {
                                     settingsViewModel.refresh()
                                 }
                             }
+                            override fun onRequestCalendarPermission() {
+                                requestCalendarPermission(arrayOf(Manifest.permission.READ_CALENDAR))
+                            }
                             override fun onRemoveContact(conversationId: String) {
                                 settingsViewModel.removeContact(conversationId)
                             }
@@ -704,6 +768,9 @@ fun ArgusNavHost() {
                             override fun onRunAutoBackupNow() = settingsViewModel.runAutoBackupNow()
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onOpenModes() {
+                                navController.navigate(Routes.MODES) { launchSingleTop = true }
+                            }
                             override fun onSetHealthAlertsEnabled(enabled: Boolean) =
                                 settingsViewModel.setHealthAlertsEnabled(enabled)
                             override fun onSetResponseTimeout(minutes: Int) =
@@ -715,6 +782,9 @@ fun ArgusNavHost() {
                             override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                             override fun onRerunOnboarding() {
                                 navController.navigate(Routes.ONBOARDING)
+                            }
+                            override fun onOpenSecrets() {
+                                navController.navigate(Routes.SECRETS) { launchSingleTop = true }
                             }
                             override fun onSelectProvider(providerId: String) =
                                 settingsViewModel.selectProvider(providerId)
@@ -951,7 +1021,8 @@ fun ArgusNavHost() {
 }
 
 /**
- * Picker whitelist (P1): propone le conversazioni WhatsApp 1:1 osservate dal listener.
+ * Picker whitelist (P1): propone le conversazioni 1:1 osservate dal listener (WhatsApp e, dalla 0.8,
+ * Telegram, Signal e Google Messaggi), ciascuna con la sua app.
  * I gruppi non compaiono mai; l'inserimento manuale dell'hash resta diagnostica avanzata.
  */
 @Composable
@@ -983,7 +1054,7 @@ private fun ContactPickerDialog(
                                     .padding(vertical = 10.dp, horizontal = 4.dp),
                             ) {
                                 Text(
-                                    contact.displayName,
+                                    contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                                 Text(

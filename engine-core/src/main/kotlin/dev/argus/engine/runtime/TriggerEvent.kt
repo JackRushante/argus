@@ -110,13 +110,19 @@ sealed interface TriggerEvent {
     /**
      * Inizio o fine (spostati dell'offset approvato) di un evento di calendario che combacia coi filtri
      * della regola: lo programma la sorgente per la regola, come una sveglia, quindi porta id e impronta.
-     * Titolo e calendario dell'evento non entrano nel core.
+     * Il calendario dell'evento non entra nel core; il [title] sì, solo in RAM, per il payload `TITLE`
+     * della regola (dato esterno, TAINTED: un invito lo scrive un altro). Mai nei log.
      */
     data class CalendarEventFired(
         override val automationId: AutomationId,
         val phase: CalendarPhase,
         override val approvalFingerprint: ApprovalFingerprint,
-    ) : Registered
+        val title: String? = null,
+    ) : Registered {
+        override fun toString(): String =
+            "CalendarEventFired(automationId=$automationId, phase=$phase, " +
+                "approvalFingerprint=$approvalFingerprint, title=${title?.let { "<redacted>" }})"
+    }
 
     /**
      * Un tag NFC letto dal telefono. [tagId] vive solo in RAM per il match: mai persistito né loggato.
@@ -146,6 +152,10 @@ sealed interface TriggerEvent {
         val currentMinutes: Int,
     ) : TriggerEvent
 
-    /** La modalità utente è passata da [from] (null = nessuna o ignota) a [to]. */
-    data class UserModeChanged(val to: String, val from: String?) : TriggerEvent
+    /**
+     * La modalità utente è passata da [from] (null = nessuna o ignota) a [to]. [chained] = il cambio l'ha
+     * fatto una regola scattata a sua volta da un cambio di modalità: nessuna regola `user_mode_changed`
+     * lo riceve (il [TriggerMatcher] lo rifiuta), così due regole non si rimbalzano la modalità all'infinito.
+     */
+    data class UserModeChanged(val to: String, val from: String?, val chained: Boolean = false) : TriggerEvent
 }

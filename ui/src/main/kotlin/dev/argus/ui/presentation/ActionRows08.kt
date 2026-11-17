@@ -7,6 +7,7 @@ import dev.argus.engine.model.OutputKind
 import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SecretRef
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.StoredOp
 import dev.argus.ui.model.ActionRow
 
@@ -52,7 +53,13 @@ internal object ActionRows08 {
         }
         val value = a.value?.let { l.pick(" · value: ${quoted(it)}", " · valore: ${quoted(it)}") }
             ?: if (a.op == StoredOp.INCREMENT) l.pick(" · by 1", " · di 1") else ""
-        return row("stored", l.pick("Change a stored value", "Cambia un valore conservato"), what + value)
+        // 0.8: il tipo che SET scrive (testo se assente).
+        val type = when (a.valueType) {
+            null, StateValueType.TEXT -> ""
+            StateValueType.NUMBER -> l.pick(" · as a number", " · come numero")
+            StateValueType.BOOLEAN -> l.pick(" · as true/false", " · come vero/falso")
+        }
+        return row("stored", l.pick("Change a stored value", "Cambia un valore conservato"), what + value + type)
     }
 
     fun setUserMode(a: Action.SetUserMode, l: RenderLanguage) = row(
@@ -86,8 +93,16 @@ internal object ActionRows08 {
         val details = listOfNotNull(
             a.label?.let { l.pick("button ${quoted(it)}", "pulsante ${quoted(it)}") },
             a.snoozeMinutes?.let { l.pick("for $it minutes", "per $it minuti") },
+            // L'app è quella del trigger (riga «Quando»): il pulsante si preme solo lì.
+            if (a.op == NotificationActionOp.CLICK) {
+                l.pick("in the app of the trigger, on your behalf", "nell'app del trigger, al posto tuo")
+            } else {
+                null
+            },
         )
+        // Premere un pulsante di un'altra app è come un tocco: porta il segno «conferma dal vivo».
         return row("notify", label, details.joinToString(" · ").ifEmpty { null })
+            .copy(requiresLiveConfirm = a.op == NotificationActionOp.CLICK)
     }
 
     fun sendSms(a: Action.SendSms, l: RenderLanguage) = row(
@@ -170,10 +185,11 @@ internal object ActionRows08 {
         }
     }
 
+    /** Come nella tavola approvata: `Bearer ⟨segreto ha_token⟩`. Il nome, mai il valore. */
     private fun secretValue(ref: SecretRef, l: RenderLanguage): String =
         VisibleText.singleLine(ref.prefix) + l.pick(
-            "[secret ${quoted(ref.secret)} from the phone's vault]",
-            "[segreto ${quoted(ref.secret)} dalla cassaforte del telefono]",
+            "⟨secret ${VisibleText.singleLine(ref.secret)}⟩",
+            "⟨segreto ${VisibleText.singleLine(ref.secret)}⟩",
         )
 
     /** Suffisso del dettaglio di `invoke_llm` con l'uscita vincolata; vuoto se l'uscita è testo libero. */

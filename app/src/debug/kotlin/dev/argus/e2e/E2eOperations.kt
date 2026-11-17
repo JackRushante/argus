@@ -10,6 +10,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.ChangeAuthor
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.safety.Severity
@@ -280,6 +281,12 @@ class E2eOperations(
             removedDrafts += 1
         }
         services.automationPauseStore().setPaused(false)
+        // 0.8: nessuna modalità attiva e via i valori della suite (chiave `e2e_`), così il tetto di 64 non si riempie.
+        runCatching { services.userModeStore().activate(null, ChangeAuthor.User, System.currentTimeMillis()) }
+        runCatching {
+            val values = services.storedValueStore()
+            values.all().filter { it.key.startsWith(E2E_STORED_PREFIX) }.forEach { values.delete(it.key) }
+        }
         runCatching { services.timeAlarmRuntime().reconcile(ReconcileReason.CAPABILITY_CHANGED) }
         return buildJsonObject {
             put("ok", true)
@@ -300,6 +307,9 @@ class E2eOperations(
         val preferences = services.appPreferencesStore()
         if (!preferences.observe().value.privacyAccepted) preferences.setPrivacyAccepted(true)
         if (!preferences.observe().value.onboardingCompleted) preferences.setOnboardingCompleted(true)
+        // 0.8: le modalità che le regole della suite nominano devono esistere all'approvazione.
+        val modes = services.userModeStore()
+        E2E_MODES.forEach { name -> runCatching { modes.add(name) } }
     }
 
     private suspend fun status(): JsonObject {
@@ -373,6 +383,12 @@ class E2eOperations(
     companion object {
         /** Prefisso del nome delle regole della suite: `reset` toglie solo queste. */
         const val RULE_PREFIX = "e2e/"
+
+        /** 0.8: modalità create per la suite (`e2e` è quella degli eventi sintetici senza `to`). */
+        val E2E_MODES = listOf("e2e", "E2E Casa", "E2E Lavoro")
+
+        /** 0.8: prefisso delle chiavi dei valori conservati scritti dalla suite. */
+        const val E2E_STORED_PREFIX = "e2e_"
         private const val DEFAULT_FIRE_TIMEOUT_MS = 90_000L
         private const val MAX_DETAIL = 300
 

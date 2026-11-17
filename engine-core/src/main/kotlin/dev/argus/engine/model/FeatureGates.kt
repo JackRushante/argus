@@ -24,7 +24,7 @@ enum class FeatureGate(
     // --- Regola ----------------------------------------------------------------------------------
 
     /** `confirm`: chiedi all'utente prima di eseguire. */
-    CONFIRM("confirm", enabled = false),
+    CONFIRM("confirm", enabled = true),
 
     /** `exit`: la regola-intervallo finisce col suo trigger d'uscita. */
     EXIT("exit", enabled = false),
@@ -32,35 +32,35 @@ enum class FeatureGate(
     // --- Variabili -------------------------------------------------------------------------------
 
     /** Variabile `stored`: valore conservato fra le esecuzioni. */
-    VAR_STORED("stored", enabled = false),
+    VAR_STORED("stored", enabled = true),
 
     // --- Condizioni ------------------------------------------------------------------------------
 
     /** Condizione `weekday`. */
-    CONDITION_WEEKDAY("weekday", enabled = false),
+    CONDITION_WEEKDAY("weekday", enabled = true),
 
     /** Condizione `wifi_connected`. */
-    CONDITION_WIFI_CONNECTED("wifi_connected", enabled = false),
+    CONDITION_WIFI_CONNECTED("wifi_connected", enabled = true),
 
     /** Condizione `bluetooth_connected`. */
-    CONDITION_BLUETOOTH_CONNECTED("bluetooth_connected", enabled = false),
+    CONDITION_BLUETOOTH_CONNECTED("bluetooth_connected", enabled = true),
 
     /** Condizione `headset_connected`. */
-    CONDITION_HEADSET_CONNECTED("headset_connected", enabled = false),
+    CONDITION_HEADSET_CONNECTED("headset_connected", enabled = true),
 
     /** Condizione `calendar_busy`. */
-    CONDITION_CALENDAR_BUSY("calendar_busy", enabled = false),
+    CONDITION_CALENDAR_BUSY("calendar_busy", enabled = true),
 
     /** Condizione `stored_compare`. */
-    CONDITION_STORED_COMPARE("stored_compare", enabled = false),
+    CONDITION_STORED_COMPARE("stored_compare", enabled = true),
 
     /** Condizione `user_mode_is`. */
-    CONDITION_USER_MODE_IS("user_mode_is", enabled = false),
+    CONDITION_USER_MODE_IS("user_mode_is", enabled = true),
 
     // --- Trigger ---------------------------------------------------------------------------------
 
     /** Trigger `calendar_event`. */
-    TRIGGER_CALENDAR_EVENT("calendar_event", enabled = false),
+    TRIGGER_CALENDAR_EVENT("calendar_event", enabled = true),
 
     /** Trigger `nfc_tag`. */
     TRIGGER_NFC_TAG("nfc_tag", enabled = true),
@@ -72,7 +72,7 @@ enum class FeatureGate(
     TRIGGER_APP_USAGE("app_usage", enabled = true),
 
     /** Trigger `user_mode_changed`. */
-    TRIGGER_USER_MODE_CHANGED("user_mode_changed", enabled = false),
+    TRIGGER_USER_MODE_CHANGED("user_mode_changed", enabled = true),
 
     /** Trigger `sensor` con `kind` = `shake`. */
     TRIGGER_SENSOR_SHAKE("sensor.shake", enabled = true),
@@ -83,19 +83,19 @@ enum class FeatureGate(
     // --- Azioni ----------------------------------------------------------------------------------
 
     /** Azione `ask`. */
-    ACTION_ASK("ask", enabled = false),
+    ACTION_ASK("ask", enabled = true),
 
     /** Azione `set_stored`. */
-    ACTION_SET_STORED("set_stored", enabled = false),
+    ACTION_SET_STORED("set_stored", enabled = true),
 
     /** Azione `set_user_mode`. */
-    ACTION_SET_USER_MODE("set_user_mode", enabled = false),
+    ACTION_SET_USER_MODE("set_user_mode", enabled = true),
 
     /** Azione `notification_reply`. */
-    ACTION_NOTIFICATION_REPLY("notification_reply", enabled = false),
+    ACTION_NOTIFICATION_REPLY("notification_reply", enabled = true),
 
     /** Azione `notification_action`. */
-    ACTION_NOTIFICATION_ACTION("notification_action", enabled = false),
+    ACTION_NOTIFICATION_ACTION("notification_action", enabled = true),
 
     /** Azione `send_sms`. */
     ACTION_SEND_SMS("send_sms", enabled = false),
@@ -112,13 +112,13 @@ enum class FeatureGate(
     // --- Campi nuovi di azioni esistenti ---------------------------------------------------------
 
     /** `http_request.captureAs` ed `http_request.extract`: cattura della risposta. */
-    HTTP_CAPTURE("http_request.captureAs", enabled = false),
+    HTTP_CAPTURE("http_request.captureAs", enabled = true),
 
     /** `http_request.secretHeaders` e `http_request.secretQuery`: valori dalla cassaforte. */
-    HTTP_SECRETS("http_request.secretHeaders", enabled = false),
+    HTTP_SECRETS("http_request.secretHeaders", enabled = true),
 
     /** `invoke_llm.output`: uscita del modello vincolata. */
-    LLM_OUTPUT("invoke_llm.output", enabled = false),
+    LLM_OUTPUT("invoke_llm.output", enabled = true),
 }
 
 /**

@@ -13,6 +13,7 @@ import android.widget.RemoteViewsService
 import dev.argus.R
 import dev.argus.automation.manual.ManualEntry
 import dev.argus.automation.manual.ManualIntents
+import dev.argus.automation.modes.ModeWidgetEntry
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -68,15 +69,23 @@ class ManualWidgetService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = Factory(applicationContext)
 
     private class Factory(private val context: Context) : RemoteViewsService.RemoteViewsFactory {
+        /** 0.8: prima le modalità (quella attiva con la spunta), poi le regole manuali. */
+        private sealed interface Row {
+            data class Mode(val entry: ModeWidgetEntry) : Row
+            data class Rule(val entry: ManualEntry) : Row
+        }
+
         @Volatile
-        private var entries: List<ManualEntry> = emptyList()
+        private var entries: List<Row> = emptyList()
 
         override fun onCreate() = Unit
 
-        // Chiamato su un thread binder: può bloccare finché ha letto le regole.
+        // Chiamato su un thread binder: può bloccare finché ha letto modalità e regole.
         override fun onDataSetChanged() {
-            entries = runCatching { runBlocking { context.manualEntryPoint().catalog().entries() } }
-                .getOrDefault(emptyList())
+            val entry = context.manualEntryPoint()
+            val modes = runCatching { runBlocking { entry.modes().widgetEntries() } }.getOrDefault(emptyList())
+            val rules = runCatching { runBlocking { entry.catalog().entries() } }.getOrDefault(emptyList())
+            entries = modes.map(Row::Mode) + rules.map(Row::Rule)
         }
 
         override fun onDestroy() {
@@ -86,15 +95,33 @@ class ManualWidgetService : RemoteViewsService() {
         override fun getCount(): Int = entries.size
 
         override fun getViewAt(position: Int): RemoteViews? {
-            val entry = entries.getOrNull(position) ?: return null
+            val row = entries.getOrNull(position) ?: return null
             return RemoteViews(context.packageName, R.layout.manual_widget_item).apply {
-                setTextViewText(R.id.manual_widget_item, entry.name)
-                setOnClickFillInIntent(
-                    R.id.manual_widget_item,
-                    Intent()
-                        .putExtra(ManualIntents.EXTRA_RULE_ID, entry.id)
-                        .putExtra(ManualIntents.EXTRA_TOKEN, entry.token),
-                )
+                when (row) {
+                    is Row.Mode -> {
+                        val name = row.entry.name
+                        setTextViewText(
+                            R.id.manual_widget_item,
+                            if (row.entry.active) context.getString(R.string.mode_widget_active, name) else name,
+                        )
+                        // Come le regole: il pulsante porta il token dei pulsanti modalità, il trampolino lo verifica.
+                        setOnClickFillInIntent(
+                            R.id.manual_widget_item,
+                            Intent()
+                                .putExtra(ManualIntents.EXTRA_MODE, name)
+                                .putExtra(ManualIntents.EXTRA_TOKEN, row.entry.token),
+                        )
+                    }
+                    is Row.Rule -> {
+                        setTextViewText(R.id.manual_widget_item, row.entry.name)
+                        setOnClickFillInIntent(
+                            R.id.manual_widget_item,
+                            Intent()
+                                .putExtra(ManualIntents.EXTRA_RULE_ID, row.entry.id)
+                                .putExtra(ManualIntents.EXTRA_TOKEN, row.entry.token),
+                        )
+                    }
+                }
             }
         }
 
@@ -102,7 +129,11 @@ class ManualWidgetService : RemoteViewsService() {
 
         override fun getViewTypeCount(): Int = 1
 
-        override fun getItemId(position: Int): Long = entries.getOrNull(position)?.id?.hashCode()?.toLong() ?: -1L
+        override fun getItemId(position: Int): Long = when (val row = entries.getOrNull(position)) {
+            null -> -1L
+            is Row.Mode -> "mode:${row.entry.name}".hashCode().toLong()
+            is Row.Rule -> row.entry.id.hashCode().toLong()
+        }
 
         override fun hasStableIds(): Boolean = true
     }

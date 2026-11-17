@@ -1,0 +1,197 @@
+[
+ {
+  "id": "H01-http-capture",
+  "title": "Richiesta HTTP: la risposta catturata va in una notifica",
+  "cond": "none",
+  "rule": {
+   "name": "H01-http-capture",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/",
+     "captureAs": "page"
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "var_compare",
+      "varName": "page",
+      "op": "CONTAINS",
+      "expected": "Example Domain"
+     },
+     "then": [
+      {
+       "type": "show_notification",
+       "title": "e2e H01 {{RUN}}",
+       "text": "captured"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions_contain": [
+     "http_request:SUCCEEDED",
+     "show_notification:SUCCEEDED"
+    ]
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e H01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 8
+   }
+  ],
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "H02-http-extract-not-json",
+  "title": "Richiesta HTTP: un puntatore JSON su una pagina HTML fallisce chiuso",
+  "cond": "true",
+  "rule": {
+   "name": "H02-http-extract-not-json",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/",
+     "captureAs": "temp",
+     "extract": "/current/temp"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED",
+    "actions": [
+     "http_request:FAILED:http_capture_not_json"
+    ]
+   }
+  },
+  "needs": [
+   "internet"
+  ]
+ },
+ {
+  "id": "H03-http-secret-missing",
+  "title": "Richiesta HTTP: un segreto non salvato impedisce di armare",
+  "cond": "none",
+  "rule": {
+   "name": "H03-http-secret-missing",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/",
+     "secretHeaders": [
+      {
+       "name": "Authorization",
+       "secret": "e2e_missing_token",
+       "prefix": "Bearer "
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "secret_missing",
+     "detail": "e2e_missing_token"
+    }
+   }
+  }
+ },
+ {
+  "id": "H04-http-secret-cleartext",
+  "title": "Richiesta HTTP: un segreto in chiaro sulla rete locale e' un errore",
+  "cond": "none",
+  "rule": {
+   "name": "H04-http-secret-cleartext",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "http://10.0.2.2:8123/api",
+     "secretQuery": [
+      {
+       "name": "token",
+       "secret": "e2e_missing_token"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "http_cleartext_secret"
+    }
+   }
+  }
+ },
+ {
+  "id": "H05-http-local-network",
+  "title": "Richiesta HTTP: http:// verso la rete locale si arma e parte",
+  "cond": "true",
+  "rule": {
+   "name": "H05-http-local-network",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "http://10.0.2.2:9/"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED",
+    "actions": [
+     "http_request:FAILED:http_network_error"
+    ]
+   }
+  }
+ }
+]

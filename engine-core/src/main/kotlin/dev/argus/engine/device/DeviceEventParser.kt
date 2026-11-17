@@ -105,13 +105,16 @@ class DeviceEventParser {
         )
     }
 
-    /** Cambio di modalità utente. `null` se [to] è vuota o troppo lunga. */
-    fun userMode(to: String, from: String?, atMillis: Long): TriggerEnvelope? {
+    /**
+     * Cambio di modalità utente. `null` se [to] è vuota o troppo lunga. [chained] = cambio fatto da una regola
+     * scattata da un cambio di modalità (vedi [TriggerEvent.UserModeChanged.chained]).
+     */
+    fun userMode(to: String, from: String?, atMillis: Long, chained: Boolean = false): TriggerEnvelope? {
         fun valid(mode: String) = mode.isNotBlank() && mode.length <= MAX_MODE_CHARS && mode.none(Char::isISOControl)
         if (!valid(to) || (from != null && !valid(from))) return null
         return envelope(
-            TriggerEvent.UserModeChanged(to, from),
-            "user_mode", from.orEmpty(), to, instant(atMillis),
+            TriggerEvent.UserModeChanged(to, from, chained),
+            "user_mode", from.orEmpty(), to, instant(atMillis), chained.toString(),
         )
     }
 

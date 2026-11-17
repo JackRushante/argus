@@ -29,6 +29,12 @@ import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.power.WaitWakeSignals
 import dev.argus.automation.power.WakeAlarmBackend
 import dev.argus.automation.power.WakeAwarePause
+import dev.argus.automation.prompt.AndroidUserPromptSurface
+import dev.argus.automation.prompt.EngineConfirmedRuns
+import dev.argus.automation.prompt.PendingPromptStore
+import dev.argus.automation.prompt.PrefsPromptBlobs
+import dev.argus.automation.prompt.UserPromptCoordinator
+import dev.argus.automation.prompt.UserPromptStartup
 import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
@@ -209,6 +215,14 @@ import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.phone.PrefsCallStateStore
+import dev.argus.automation.calendar.AndroidCalendarAlarmScheduler
+import dev.argus.automation.calendar.AndroidCalendarInstanceSource
+import dev.argus.automation.calendar.CalendarInstanceSource
+import dev.argus.automation.calendar.CalendarTriggerCoordinator
+import dev.argus.automation.calendar.CalendarTriggerLifecycle
+import dev.argus.automation.calendar.CalendarTriggerRuntime
+import dev.argus.automation.calendar.PrefsCalendarFiredStore
+import dev.argus.automation.context.AndroidDeviceFactsReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityEventIngress
 import dev.argus.automation.connectivity.AndroidConnectivitySentinelBackend
@@ -336,12 +350,15 @@ object ArgusModule {
         repository: RoomDraftRepository,
         installInfo: AppInstallInfo,
         labelStore: RoomRuleLabelStore,
+        backupState: dev.argus.data.RoomBackupState,
     ): RulesBackupService = RulesBackupService(
         automations = store,
         drafts = repository,
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
         labels = { labelStore.snapshot() },
+        // 0.8: modalità e valori conservati nel backup completo.
+        state = backupState,
     )
 
     /** 0.7.2: modelli di regola negli asset dell'app (galleria «Modelli»). */
@@ -592,6 +609,9 @@ object ArgusModule {
         location: CurrentLocationProvider,
         root: RootAccess,
         usageForeground: ForegroundAppSource,
+        @ApplicationContext context: Context,
+        calendarSource: CalendarInstanceSource,
+        persistentState: dev.argus.automation.PersistentStateReader,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
         gateway,
@@ -603,7 +623,46 @@ object ArgusModule {
             gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
         },
         usageForeground = usageForeground,
+        // 0.8: condizioni di contesto (Wi-Fi, Bluetooth, cuffie, calendario) con le API pubbliche.
+        factsReader = AndroidDeviceFactsReader(context, calendarSource),
+        // 0.8: valori conservati e modalità.
+        persistentState = persistentState,
     )
+
+    /** 0.8: istanze del calendario del telefono (`READ_CALENDAR`), per calendar_busy e calendar_event. */
+    @Provides
+    @Singleton
+    fun calendarInstanceSource(@ApplicationContext context: Context): CalendarInstanceSource =
+        AndroidCalendarInstanceSource(context)
+
+    @Provides
+    @Singleton
+    fun calendarTriggerCoordinator(
+        @ApplicationContext context: Context,
+        store: AutomationStore,
+        source: CalendarInstanceSource,
+        engine: Engine,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+    ): CalendarTriggerCoordinator = CalendarTriggerCoordinator(
+        store = store,
+        source = source,
+        firedStore = PrefsCalendarFiredStore(context),
+        alarms = AndroidCalendarAlarmScheduler(context),
+        dispatch = { envelope -> frame.run { engine.onTrigger(envelope) { request -> state.current(request) } } },
+    )
+
+    @Provides
+    fun calendarTriggerRuntime(coordinator: CalendarTriggerCoordinator): CalendarTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
+    fun calendarTriggerLifecycle(
+        @ApplicationContext context: Context,
+        coordinator: CalendarTriggerCoordinator,
+        store: AutomationStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): CalendarTriggerLifecycle = CalendarTriggerLifecycle(context, coordinator, store, scope)
 
     @Provides
     fun deviceStateSnapshotProvider(
@@ -638,7 +697,14 @@ object ArgusModule {
     )
 
     @Provides
-    fun capabilityProbeBoundary(probe: AndroidCapabilityProbe): CapabilityProbe = probe
+    fun capabilityProbeBoundary(
+        probe: AndroidCapabilityProbe,
+        secrets: dev.argus.engine.secrets.SecretVault,
+        userModes: dev.argus.automation.UserModeNames,
+    ): CapabilityProbe = dev.argus.automation.modes.UserModeNamesCapabilityProbe(
+        dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets),
+        userModes,
+    )
 
     @Provides
     fun firePolicySnapshotProvider(probe: AndroidCapabilityProbe): FirePolicySnapshotProvider = probe
@@ -870,7 +936,9 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
+    fun httpRequestExecutor(secrets: dev.argus.engine.secrets.SecretVault): HttpRequestExecutor =
+        // 0.8: i valori della cassaforte si leggono solo qui, allo scatto.
+        HttpRequestExecutor(secrets = secrets)
 
     // --- 0.5.1: azioni privilegiate tipizzate (controllo app, aereo, posizione, NFC, ...) ---
 
@@ -931,6 +999,7 @@ object ArgusModule {
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
         uiSteps: UiStepsRunner,
+        storedModes: dev.argus.engine.runtime.StoredModeActions,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -960,6 +1029,12 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: chiudi, posticipa o premi un pulsante della notifica, via il listener collegato.
+            notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
+                dev.argus.automation.notification.ConnectedNotificationListener,
+            ),
+            // 0.8: set_stored e set_user_mode.
+            storedModes = storedModes,
         )
 
     @Provides
@@ -1017,6 +1092,7 @@ object ArgusModule {
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
         automationPause: LabelAwarePause,
+        prompts: UserPromptCoordinator,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -1030,7 +1106,47 @@ object ArgusModule {
         // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
         // 0.7.2: decisa per regola, con la pausa dei gruppi (etichette).
         firingPause = automationPause,
+        // 0.8: «chiedimi prima di eseguire» e le domande con pulsanti.
+        confirmations = prompts,
+        questions = prompts,
         now = System::currentTimeMillis,
+    )
+
+    /** 0.8: domande in attesa (confirm, ask), cifrate con la chiave delle risposte differite. */
+    @Provides
+    @Singleton
+    fun pendingPromptStore(
+        @ApplicationContext context: Context,
+        cipher: DeferredReplyCipher,
+    ): PendingPromptStore = PendingPromptStore(PrefsPromptBlobs(context), cipher)
+
+    @Provides
+    @Singleton
+    fun userPromptCoordinator(
+        @ApplicationContext context: Context,
+        store: PendingPromptStore,
+        engine: Provider<Engine>,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+        wakeAwarePause: WakeAwarePause,
+    ): UserPromptCoordinator = UserPromptCoordinator(
+        store = store,
+        surface = AndroidUserPromptSurface(context),
+        // Il motore dipende dal coordinatore: lo si risolve al primo Esegui.
+        runs = EngineConfirmedRuns(engine, state, frame),
+        pause = { millis -> wakeAwarePause.pause(millis) },
+    )
+
+    @Provides
+    @Singleton
+    fun userPromptStartup(
+        @ApplicationScope scope: CoroutineScope,
+        coordinator: UserPromptCoordinator,
+        preferences: AppPreferencesStore,
+    ): UserPromptStartup = UserPromptStartup(
+        scope,
+        coordinator,
+        preferences.observe().map { it.privacyAccepted },
     )
 
     @Provides
@@ -1464,6 +1580,7 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         foregroundLauncher: ReceiverWorkLauncher,
+        calendar: CalendarTriggerRuntime,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1476,6 +1593,7 @@ object ArgusModule {
         audit,
         oneShotConsumptions,
         foregroundLauncher,
+        calendar,
     )
 
     /**
@@ -1523,6 +1641,8 @@ object ArgusModule {
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
         nfcTags: AndroidNfcTagReader,
+        userModes: dev.argus.data.RoomUserModeStore,
+        secrets: dev.argus.engine.secrets.SecretVault,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -1535,6 +1655,10 @@ object ArgusModule {
         installedPackages = installedApps,
         nfcTags = nfcTags,
         nfcScansVerifiable = { Build.VERSION.SDK_INT >= NfcScanVerification.FIRST_VERIFIABLE_API },
+        // 0.8: le modalità nominate da una regola devono esistere all'approvazione.
+        userModes = { userModes.snapshot().modes },
+        // 0.8: una regola che nomina un segreto non salvato non si arma (solo i nomi, mai i valori).
+        savedSecrets = { secrets.names() },
     )
 
     @Provides
