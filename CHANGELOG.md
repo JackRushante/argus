@@ -116,6 +116,10 @@ cases are listed under "Changed".
 
 ### Fixed
 
+- Compiling through the self-hosted Hermes bridge failed with `invalid_manifest` on every request since
+  0.4.1: the phone announced triggers the bridge does not know ("manual" always), and the bridge rejected
+  the whole request. The phone now offers the bridge only the triggers of its contract, so bridges
+  already installed work again; an updated bridge also drops unknown triggers instead of refusing.
 - A "in N minutes" rule edited and approved again fired at the old time; it now counts from the new
   approval, and switching it back on restarts the timer.
 - Switching between two Wi-Fi networks fires "disconnected" for the old one and "connected" for the
@@ -188,8 +192,10 @@ cases are listed under "Changed".
 - Shake and face down work only while the screen is on.
 - The dry run does not simulate the SMS and call caps, the AI budget or a cooldown in progress, and it
   does not take readings that need Shizuku or root: those conditions count as unknown, so not met.
-- The Hermes bridge's compile prompt does not describe the vocabulary added in this release yet: compile
-  the new triggers, conditions and actions with a direct provider.
+- The Hermes bridge compiles only its own vocabulary: the triggers time, immediate, notification,
+  geofence (enter or exit), SMS and calls, connectivity and the basic sensors, and the actions it knew
+  before 0.4.1. Manual, screen, battery and app triggers, the 0.4.1 and 0.5.1 actions and everything
+  added in this release need a direct provider.
 
 ## v0.7.1 (2026-11-16) — AI servers on your network, response timeout, copyable chat
 

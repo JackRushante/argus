@@ -774,7 +774,9 @@ class CliBridgeTransport internal constructor(
             ContactEnvelope(alias = ContactAliasMapper.aliasFor(index), displayName = ContactAliasMapper.modelDisplayName(contact))
         },
         stateKeys = stateKeys,
-        availableTriggers = availableTriggers,
+        // Il bridge v2 rifiuta l'intero manifest se un trigger non è nel suo elenco chiuso: si offrono
+        // solo quelli, nel suo ordine canonico. Gli altri (manual, screen, 0.8…) non passano dal bridge.
+        availableTriggers = BRIDGE_COMPILE_TRIGGERS.filter { it in availableTriggers },
         stateReaders = StateReadersEnvelope(
             policyVersion = stateReaders.policyVersion,
             families = stateReaders.families.map { it.wireName },
@@ -860,6 +862,32 @@ class CliBridgeTransport internal constructor(
 
     companion object {
         const val COMPILE_SCHEMA_VERSION = 2
+
+        /**
+         * I trigger che il bridge Hermes conosce per il compile, nel suo ordine canonico
+         * (`AVAILABLE_TRIGGER_IDS` in `ops/hermes/bridge.py`; i due elenchi li tiene allineati il contratto
+         * condiviso `contracts/hermes-compile-v2-manifest.json`). Un bridge già installato rifiuta con
+         * `invalid_manifest` un manifest che ne nomina altri, quindi il telefono offre al bridge solo questi:
+         * i trigger più nuovi si compilano con un provider diretto.
+         */
+        internal val BRIDGE_COMPILE_TRIGGERS: List<String> = listOf(
+            "time",
+            "immediate",
+            "notification",
+            "geofence",
+            "phone_state.sms",
+            "phone_state.call",
+            "connectivity.wifi",
+            "connectivity.wifi.identity",
+            "connectivity.bt",
+            "connectivity.power",
+            "sensor.significant_motion",
+            "sensor.stationary_detect",
+            "sensor.motion_detect",
+            "sensor.step_detector",
+            "sensor.step_counter",
+        )
+
         const val ACT_SCHEMA_VERSION = 1
         const val ACT_V2_SCHEMA_VERSION = 2
 
