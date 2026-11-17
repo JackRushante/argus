@@ -797,8 +797,6 @@ Action, discriminated by "type":
 - {"type":"open_url", "url":string}
 - {"type":"show_notification", "title":string, "text":string}  // the user may give one text or none:
    // write the missing title or text yourself (short, in the reply language), never ask for it
-- {"type":"tap", "x":integer, "y":integer}
-- {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
 - {"type":"notification_reply", "text":string}  // like whatsapp_reply (rule 9) for Telegram, Signal and
    // Google Messages: replies in the 1:1 chat whose notification started the rule
@@ -965,7 +963,8 @@ VarBinding, discriminated by "type":
    // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
 - {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
-   // EXTERNAL payload of the trigger (SMS/notification; calendar_event: only TITLE): integrity TAINTED,
+   // EXTERNAL payload of the trigger (notification: TEXT, TITLE, SENDER; SMS: TEXT, NUMBER; call: NUMBER;
+   // calendar_event: TITLE): integrity TAINTED,
    // confidentiality >= PRIVATE.
    // extractionRegex = first non-empty capture group, or the whole match; null = full field.
 - {"type":"random_int", "name":string, "max":integer (1..1000000)}
@@ -993,7 +992,9 @@ at most 64 action nodes total across the whole program:
    "maxIterations":integer 1..1000 | "maxIterationsVar":string,
    "delayBetweenMs":integer 0..3600000 (optional)}
    // BOUNDED loop: provide EXACTLY ONE of maxIterations / maxIterationsVar (a counter plus a time
-   // deadline forbid infinite loops). maxIterationsVar names a NUMBER variable (e.g. a random_int)
+   // deadline forbid infinite loops). A fixed count ("at most 20 times") is maxIterations; a random count
+   // is a random_int var in maxIterationsVar with condition boolean_literal true (set_stored never changes
+   // a variable). maxIterationsVar names a NUMBER variable (e.g. a random_int)
    // read at run time and clamped to 1..1000 — use it to repeat a dynamic number of times.
    // "From now, every 5 s while Wi-Fi is off / until it charges" = immediate trigger + while whose
    // condition is a state_equals on that key: the loop condition is not a trigger.

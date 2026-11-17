@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -79,6 +80,12 @@ class AgentMessageSupportCapabilityWordingTest {
     @Test
     fun `two fitting apps are asked even when one label is exact`() {
         assertTrue("not even the one whose label equals the word in the request" in flat)
+    }
+
+    @Test
+    fun `the types the probe never publishes have no schema line to lure the model`() {
+        assertFalse("{\"type\":\"tap\"" in flat)
+        assertFalse("{\"type\":\"input_text\"" in flat)
     }
 
     @Test
