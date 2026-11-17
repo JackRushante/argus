@@ -17,7 +17,12 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.runtime.CallScreeningDecider
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Le decisioni di `screen_call` prese dal servizio di filtro chiamate, in memoria e per poco: quando poi il
@@ -80,8 +85,13 @@ class AndroidContactLookup(context: Context) : ContactLookup {
  * [CallScreeningDecider] e registra ogni decisione nel Log SENZA il numero. Tutto entro [budgetMillis]: oltre
  * (o su qualunque errore) la risposta è «lascia squillare» e il Log lo dice per ogni regola di filtro.
  *
+ * Il lavoro gira su [worker], a parte: una lettura che blocca il thread (la rubrica, il database) non trattiene la
+ * risposta oltre il budget, e il suo risultato tardivo si scarta. Il Log e il registro delle decisioni dicono
+ * ciò che è stato APPLICATO: se la risposta non arriva più in tempo ad Android (`respond` = false) la chiamata
+ * ha squillato e per le regole risulta «lasciata squillare».
+ *
  * Una chiamata rifiutata non squilla, quindi Android non manda lo stato RINGING da cui partono le regole
- * «chiamata in arrivo»: dopo aver risposto [afterReject] la consegna al motore (le altre azioni della regola, e
+ * «chiamata in arrivo»: dopo aver risposto il servizio la consegna al motore (le altre azioni della regola, e
  * le altre regole sulla chiamata in arrivo, girano come sempre). Una chiamata silenziata squilla senza suono
  * e arriva al motore dal solito broadcast.
  */
@@ -96,25 +106,47 @@ class CallScreeningCoordinator(
     private val audit: AuditSink,
     private val now: () -> Long = System::currentTimeMillis,
     private val budgetMillis: Long = BUDGET_MILLIS,
+    private val worker: CoroutineContext = Dispatchers.IO,
 ) {
-    /** La risposta da dare alla chiamata: null = lasciala squillare. */
-    suspend fun decide(number: String?): ScreenCallOp? {
+    private val detached = CoroutineScope(SupervisorJob())
+
+    /**
+     * Decide la chiamata e la consegna a [respond], che risponde ad Android e dice se la risposta è stata
+     * applicata (false = era già partita quella di riserva). Restituisce l'operazione applicata, null = squilla.
+     */
+    suspend fun decide(number: String?, respond: (ScreenCallOp?) -> Boolean = { true }): ScreenCallOp? {
+        val work = detached.async(worker) { evaluate(number) }
         val decision = try {
-            withTimeoutOrNull(budgetMillis) { evaluate(number) }
+            withTimeoutOrNull(budgetMillis) { work.await() }
         } catch (error: CancellationException) {
+            work.cancel()
             throw error
         } catch (_: Exception) {
             null
         }
+        if (decision == null) work.cancel()
         if (decision == null) {
-            auditFailOpen()
+            respondSafely(respond, null)
+            auditFailOpen(null)
+            return null
+        }
+        val applied = respondSafely(respond, decision.op)
+        val op = decision.op ?: return null
+        if (!applied) {
+            auditFailOpen(decision.rules.mapTo(mutableSetOf()) { it.automationId })
             return null
         }
         decision.rules.forEach { rule ->
-            decisions.record(rule.automationId, decision.op ?: rule.op)
-            record(rule.automationId, detailFor(decision.op ?: rule.op))
+            decisions.record(rule.automationId, op)
+            record(rule.automationId, detailFor(op))
         }
-        return decision.op
+        return op
+    }
+
+    private fun respondSafely(respond: (ScreenCallOp?) -> Boolean, op: ScreenCallOp?): Boolean = try {
+        respond(op)
+    } catch (_: Exception) {
+        false
     }
 
     private suspend fun evaluate(number: String?): CallScreeningDecider.Decision {
@@ -125,15 +157,17 @@ class CallScreeningCoordinator(
         return decider.decide(rules, number, available, { it.id in paused }, contacts::isContact)
     }
 
-    private suspend fun auditFailOpen() {
-        val rules = try {
-            decider.screeningRules(armed())
+    /** «Lasciata squillare» per [ids], o per ogni regola di filtro quando non si sa quali avrebbero deciso. */
+    private suspend fun auditFailOpen(ids: Set<AutomationId>?) {
+        val targets = ids ?: try {
+            withTimeoutOrNull(budgetMillis) { decider.screeningRules(armed()).mapTo(mutableSetOf()) { it.id } }
+                .orEmpty()
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
-            emptyList()
+            emptySet()
         }
-        rules.forEach { record(it.id, SCREEN_CALL_FAILED_OPEN) }
+        targets.forEach { record(it, SCREEN_CALL_FAILED_OPEN) }
     }
 
     private suspend fun record(id: AutomationId, detail: String) {

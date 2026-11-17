@@ -18,11 +18,16 @@ import dev.argus.engine.runtime.AutomationPause
 import dev.argus.engine.runtime.CallScreeningDecider
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -46,10 +51,18 @@ class CallScreeningCoordinatorTest {
     private val decisions = ScreenCallDecisionLog { now }
     private var paused = false
 
-    private fun coordinator(
+    private fun TestScope.coordinator(
         rules: List<Automation>,
         armed: suspend () -> List<Automation> = { rules },
         contact: Boolean? = false,
+    ) = coordinator(rules, armed, { contact }, StandardTestDispatcher(testScheduler), 200)
+
+    private fun coordinator(
+        rules: List<Automation>,
+        armed: suspend () -> List<Automation>,
+        contacts: ContactLookup,
+        worker: CoroutineContext,
+        budgetMillis: Long,
     ) = CallScreeningCoordinator(
         armed = armed,
         snapshots = FirePolicySnapshotProvider {
@@ -65,7 +78,7 @@ class CallScreeningCoordinatorTest {
             )
         },
         pause = AutomationPause { paused },
-        contacts = ContactLookup { contact },
+        contacts = contacts,
         decider = CallScreeningDecider(Clock.fixed(Instant.parse("2026-11-16T12:00:00Z"), ZoneOffset.UTC)),
         decisions = decisions,
         audit = object : AuditSink {
@@ -74,7 +87,8 @@ class CallScreeningCoordinatorTest {
             }
         },
         now = { now },
-        budgetMillis = 200,
+        budgetMillis = budgetMillis,
+        worker = worker,
     )
 
     @Test
@@ -124,6 +138,45 @@ class CallScreeningCoordinatorTest {
         assertNull(slow.decide("+393331112222"))
         assertEquals(listOf(CallScreeningCoordinator.SCREEN_CALL_FAILED_OPEN), audits.map { it.detail })
         assertEquals(ActionResult.Failure(ScreenCallDecisionLog.SCREEN_CALL_NOT_APPLIED), decisions.leafResult(AutomationId("a")))
+    }
+
+    @Test
+    fun `when the answer reaches android too late the call rang and the log says so`() = runTest {
+        val answered = mutableListOf<ScreenCallOp?>()
+        val op = coordinator(listOf(rule("a", ScreenCallOp.REJECT))).decide("+393331112222") { answered += it; false }
+        assertNull(op)
+        assertEquals(listOf<ScreenCallOp?>(ScreenCallOp.REJECT), answered)
+        assertEquals(listOf(CallScreeningCoordinator.SCREEN_CALL_FAILED_OPEN), audits.map { it.detail })
+        assertEquals(ActionResult.Failure(ScreenCallDecisionLog.SCREEN_CALL_NOT_APPLIED), decisions.leafResult(AutomationId("a")))
+    }
+
+    @Test
+    fun `no decision still answers so the call rings`() = runTest {
+        val answered = mutableListOf<ScreenCallOp?>()
+        assertNull(coordinator(emptyList()).decide("+393331112222") { answered += it; true })
+        assertEquals(listOf<ScreenCallOp?>(null), answered)
+        val failing = coordinator(listOf(rule("a", ScreenCallOp.REJECT)), armed = { error("database") })
+        assertNull(failing.decide("+393331112222") { answered += it; true })
+        assertEquals(listOf<ScreenCallOp?>(null, null), answered)
+    }
+
+    @Test
+    fun `a contact lookup that blocks the thread still answers within the budget`() {
+        val blocking = coordinator(
+            listOf(rule("u", ScreenCallOp.REJECT, unknownOnly = true)),
+            armed = { listOf(rule("u", ScreenCallOp.REJECT, unknownOnly = true)) },
+            contacts = { Thread.sleep(3_000); false },
+            worker = Dispatchers.IO,
+            budgetMillis = 200,
+        )
+        val answered = mutableListOf<ScreenCallOp?>()
+        val started = System.nanoTime()
+        val op = runBlocking { blocking.decide("+393331112222") { answered += it; true } }
+        val tookMillis = (System.nanoTime() - started) / 1_000_000
+        assertNull(op)
+        assertEquals(listOf<ScreenCallOp?>(null), answered)
+        assertTrue(tookMillis < 2_000, "risposta in $tookMillis ms")
+        assertEquals(listOf(CallScreeningCoordinator.SCREEN_CALL_FAILED_OPEN), audits.map { it.detail })
     }
 
     @Test

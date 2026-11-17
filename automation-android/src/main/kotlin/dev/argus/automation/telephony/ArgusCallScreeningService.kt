@@ -11,6 +11,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.engine.model.ScreenCallOp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,12 +57,21 @@ class ArgusCallScreeningService : CallScreeningService() {
         }
         val receivedAt = System.currentTimeMillis()
         scope.launch {
-            val op = runCatching { entry.callScreeningCoordinator().decide(number) }.getOrNull()
-            val applied = answer(op)
-            Log.d(TAG, "call screened: decision=${op ?: "ring"} applied=$applied")
-            // Rifiutata: non squillerà, quindi le regole «chiamata in arrivo» partono da qui. Se la risposta
-            // di riserva è già partita la chiamata squilla e arriva al motore dal solito broadcast.
-            if (applied && op == ScreenCallOp.REJECT) {
+            // Il coordinatore risponde con [answer] e registra solo ciò che è stato applicato: se la risposta
+            // di riserva è già partita la chiamata squilla e per le regole risulta «lasciata squillare».
+            val applied = try {
+                entry.callScreeningCoordinator().decide(number, ::answer)
+            } catch (error: CancellationException) {
+                answer(null)
+                throw error
+            } catch (_: Exception) {
+                answer(null)
+                null
+            }
+            Log.d(TAG, "call screened: applied=${applied ?: "ring"}")
+            // Rifiutata: non squillerà, quindi le regole «chiamata in arrivo» partono da qui. Se squilla
+            // arriva al motore dal solito broadcast.
+            if (applied == ScreenCallOp.REJECT) {
                 runCatching { entry.phoneEventIngress().onScreenedIncomingCall(number, receivedAt) }
             }
         }
