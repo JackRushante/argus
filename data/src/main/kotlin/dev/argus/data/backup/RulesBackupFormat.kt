@@ -81,7 +81,8 @@ object RulesBackupFormat {
  *  "storedValues":[{"key":"caffe_oggi","type":"NUMBER","value":"2","integrity":"CLEAN",
  *                   "confidentiality":"PUBLIC","writerRule":"<id>"|null,"updatedAt":<ms>}]
  * ```
- * L'export completo le scrive entrambe; quello senza dati personali tiene solo i nomi delle modalità (niente
+ * L'export completo le scrive entrambe, ma un valore SECRET solo nel backup cifrato con la passphrase (in un
+ * file in chiaro manca, chiave compresa); quello senza dati personali tiene solo i nomi delle modalità (niente
  * modalità attiva, niente valori). Lettura tollerante come per le etichette: una voce malformata si salta e
  * non scarta mai una regola. Si ripristinano solo dall'import di Sistema (file scelto dall'utente).
  */

@@ -4,6 +4,7 @@ import android.net.Uri
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.toDraft
 import dev.argus.engine.runtime.AutomationStore
@@ -118,7 +119,8 @@ class RulesBackupService(
 ) : RulesBackup {
 
     override suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome {
-        val built = when (val result = build(stripPersonalData)) {
+        // Il file di «Esporta» è sempre in chiaro: nessun valore SECRET.
+        val built = when (val result = build(stripPersonalData, sealed = false)) {
             is BuiltBackup.Failed -> return ExportOutcome.Failed(result.failure)
             is BuiltBackup.Ready -> result
         }
@@ -137,11 +139,17 @@ class RulesBackupService(
 
     /**
      * Il testo dell'export COMPLETO (con i dati personali), lo stesso di «Esporta» senza l'opzione: è
-     * quello che il backup automatico cifra.
+     * quello che il backup automatico cifra. Solo questo testo porta i valori conservati SECRET: chi lo chiama
+     * lo scrive SOLO cifrato con la passphrase dell'utente (AutoBackupRunner).
      */
-    suspend fun buildFullBackup(): BuiltBackup = build(stripPersonalData = false)
+    suspend fun buildFullBackup(): BuiltBackup = build(stripPersonalData = false, sealed = true)
 
-    private suspend fun build(stripPersonalData: Boolean): BuiltBackup {
+    /**
+     * [sealed] = il testo finisce in un file cifrato con la passphrase: solo allora entrano i valori SECRET.
+     * In ogni file in chiaro un valore SECRET manca del tutto (chiave compresa): al ripristino è una chiave
+     * assente, quindi UNKNOWN, mai un valore inventato.
+     */
+    private suspend fun build(stripPersonalData: Boolean, sealed: Boolean): BuiltBackup {
         val all = try {
             automations.all()
         } catch (error: CancellationException) {
@@ -185,7 +193,11 @@ class RulesBackupService(
         } catch (_: Exception) {
             BackupState()
         }
-        val exportedState = if (stripPersonalData) BackupState(modes = fullState.modes) else fullState
+        val exportedState = when {
+            stripPersonalData -> BackupState(modes = fullState.modes)
+            sealed -> fullState
+            else -> fullState.copy(values = fullState.values.filter { it.confidentiality != ConfidentialityLabel.SECRET })
+        }
         val bytes = RulesBackupCodec.encode(
             rules = rules,
             exportedAt = Instant.ofEpochMilli(nowMillis()).toString(),

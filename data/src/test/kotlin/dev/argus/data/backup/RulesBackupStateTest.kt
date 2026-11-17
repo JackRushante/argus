@@ -155,6 +155,59 @@ class RulesBackupStateTest {
         assertEquals(ChangeAuthor.Rule(AutomationId("r1")), restored.getValue("ultimo").writer)
     }
 
+    private suspend fun seedSecret() {
+        values.apply(
+            Action.SetStored("pin_cancello", StoredOp.SET, "4321"),
+            IntegrityLabel.CLEAN,
+            ConfidentialityLabel.SECRET,
+            ChangeAuthor.Rule(AutomationId("r1")),
+            9L,
+        )
+    }
+
+    @Test
+    fun `a plain export never carries a secret value, not even its key`() = runTest {
+        seed()
+        seedSecret()
+        service().export(plainFile, stripPersonalData = false)
+        val text = documents.text(plainFile)
+        assertFalse("4321" in text)
+        assertFalse("pin_cancello" in text)
+        val full = Json.parseToJsonElement(text).jsonObject
+        assertEquals(2, full.getValue("storedValues").jsonArray.size)
+
+        service().export(plainFile, stripPersonalData = true)
+        assertFalse("4321" in documents.text(plainFile))
+        assertFalse("storedValues" in Json.parseToJsonElement(documents.text(plainFile)).jsonObject.keys)
+
+        // Ripristino: la chiave segreta manca (UNKNOWN), le altre tornano.
+        service().export(plainFile, stripPersonalData = false)
+        wipeState()
+        values.delete("pin_cancello")
+        assertIs<ImportOutcome.Done>(service().import(plainFile))
+        assertEquals(setOf("caffe_oggi", "ultimo"), values.all().map { it.key }.toSet())
+    }
+
+    @Test
+    fun `only the backup sealed with the passphrase carries a secret value, and it comes back secret`() = runTest {
+        seed()
+        seedSecret()
+        val built = assertIs<BuiltBackup.Ready>(service().buildFullBackup())
+        assertTrue("4321" in String(built.bytes))
+        val salt = ByteArray(16) { 3 }
+        val key = BackupKeyDerivation.derive("passphrase".toCharArray(), salt, iterations = 1_000)
+        val sealed = EncryptedBackupFormat.seal(built.bytes, key, salt, ByteArray(12) { 1 })
+        assertFalse("4321" in String(sealed, Charsets.ISO_8859_1))
+        documents.files[encryptedFile] = sealed
+        wipeState()
+        values.delete("pin_cancello")
+
+        assertIs<ImportOutcome.Done>(service().importEncrypted(encryptedFile, "passphrase".toCharArray()))
+        val secret = values.all().single { it.key == "pin_cancello" }
+        assertEquals("4321", secret.text)
+        assertEquals(ConfidentialityLabel.SECRET, secret.confidentiality)
+    }
+
     @Test
     fun `text received from another app imports rules only`() = runTest {
         seed()
