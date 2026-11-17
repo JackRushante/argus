@@ -4,6 +4,8 @@ import dev.argus.data.dao.AuditDao
 import dev.argus.data.entities.AuditEntity
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.ConfirmationCodes
+import dev.argus.engine.runtime.ProgramInterpreter
 import dev.argus.engine.runtime.SpanCodes
 
 /** [AuditSink] su Room (spec §10.6). Insert append-only via DAO suspend. */
@@ -66,10 +68,9 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         // 0.8: la fine di una regola-intervallo si distingue dall'inizio nel Log (codice chiuso, unico ammesso).
         dev.argus.engine.runtime.AuditKind.FIRED ->
             event.detail.takeIf { it == SpanCodes.EXIT } ?: ""
-        // 0.8: conferme, domande, programmi annullati e ripristini degli intervalli hanno un motivo chiuso che il
-        // Log mostra (i produttori emettono solo costanti); qualunque altra forma cade nel vuoto, come prima.
+        // 0.8: conferme, domande senza risposta e ripristini degli intervalli: solo i codici dell'elenco chiuso.
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE ->
-            event.detail.takeIf(::isReasonCode) ?: ""
+            event.detail.takeIf { it in NOT_ELIGIBLE_DETAILS } ?: ""
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE -> ""
     }
 
@@ -84,6 +85,13 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         /** Codice snake_case a vocabolario chiuso (ValidationIssue.code o reason interno). */
         val REASON_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
         val CALL_SCREENED_DETAILS = setOf("screen_call_rejected", "screen_call_silenced", "screen_call_failed_open")
+        /** 0.8: i motivi chiusi di uno scatto non eseguito che il Log mostra (conferma, domanda, intervallo). */
+        val NOT_ELIGIBLE_DETAILS: Set<String> = ConfirmationCodes.ALL + setOf(
+            ProgramInterpreter.ASK_TIMEOUT,
+            ProgramInterpreter.ASK_RESUME_STALE,
+            SpanCodes.VALUE_UNREADABLE,
+            SpanCodes.RESTORED_RULE_CHANGED,
+        )
         const val MAX_VALIDATION_CODES = 8
         // --- Lifecycle riuscito (task #31-B): un set chiuso per kind, fallback generico. ---
         /** Unico ingresso in ARMED: l'approvazione utente (submit o edit passano di lì). */
