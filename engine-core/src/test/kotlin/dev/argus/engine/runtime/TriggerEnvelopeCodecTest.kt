@@ -15,7 +15,10 @@ import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Transition
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** 0.8 `confirm`: l'evento in attesa di conferma torna identico, per ogni tipo di evento. */
 class TriggerEnvelopeCodecTest {
@@ -45,6 +48,7 @@ class TriggerEnvelopeCodecTest {
         TriggerEvent.MediaPlaybackChanged(MediaPlayState.PLAYING),
         TriggerEvent.AppForegroundChanged("com.example.game", AppEventKind.OPENED),
         TriggerEvent.NfcTagScanned("04:A2"),
+        TriggerEvent.NfcTagScanned("04:A2", verified = true),
         TriggerEvent.AppUsageChanged("com.example.game", 59, 60),
         TriggerEvent.UserModeChanged("casa", "lavoro"),
         // 0.8: un cambio fatto da una regola di modalità resta concatenato anche dopo il riavvio.
@@ -56,6 +60,26 @@ class TriggerEnvelopeCodecTest {
         events.forEachIndexed { index, event ->
             val envelope = TriggerEnvelope(TriggerEventId("e:$index"), event)
             assertEquals(envelope, TriggerEnvelopeCodec.decode(TriggerEnvelopeCodec.encode(envelope)), "$event")
+        }
+    }
+
+    @Test
+    fun `an nfc scan keeps its verified flag and never gains one`() {
+        fun decoded(text: String) = assertIs<TriggerEvent.NfcTagScanned>(TriggerEnvelopeCodec.decode(text)?.event)
+        fun roundTrip(event: TriggerEvent.NfcTagScanned) =
+            decoded(TriggerEnvelopeCodec.encode(TriggerEnvelope(TriggerEventId("e"), event)))
+
+        assertTrue(roundTrip(TriggerEvent.NfcTagScanned("04:A2", verified = true)).verified)
+        assertFalse(roundTrip(TriggerEvent.NfcTagScanned("04:A2", verified = false)).verified)
+        // Un evento salvato senza il flag (o col flag a null) resta non verificato: il default è il caso peggiore.
+        assertFalse(decoded("""{"id":"e","event":{"type":"nfc","tagId":"04:A2"}}""").verified)
+        assertFalse(decoded("""{"id":"e","event":{"type":"nfc","tagId":"04:A2","verified":null}}""").verified)
+        // Un flag che non è un booleano JSON non promuove nulla: l'evento non si decodifica.
+        listOf("\"true\"", "1", "\"yes\"", "{}").forEach { flag ->
+            assertNull(
+                TriggerEnvelopeCodec.decode("""{"id":"e","event":{"type":"nfc","tagId":"04:A2","verified":$flag}}"""),
+                flag,
+            )
         }
     }
 
