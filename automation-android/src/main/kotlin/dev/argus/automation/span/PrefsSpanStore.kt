@@ -8,7 +8,15 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.SpanRecord
 import dev.argus.engine.runtime.ActiveSpan
 import dev.argus.engine.runtime.SpanStore
-import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
+import kotlinx.serialization.json.put
 
 /**
  * [SpanStore] su SharedPreferences (nessuna tabella Room), come gli altri `Prefs*StateStore`: per regola
@@ -22,14 +30,7 @@ class PrefsSpanStore internal constructor(private val prefs: SharedPreferences) 
     )
 
     private val lock = Any()
-
-    @Serializable
-    private data class Stored(
-        val fingerprint: String,
-        val startedAtMillis: Long,
-        val records: List<SpanRecord> = emptyList(),
-        val handled: List<String> = emptyList(),
-    )
+    private val records = ListSerializer(SpanRecord.serializer())
 
     override suspend fun get(id: AutomationId): ActiveSpan? = synchronized(lock) { read(id) }
 
@@ -79,23 +80,28 @@ class PrefsSpanStore internal constructor(private val prefs: SharedPreferences) 
 
     private fun read(id: AutomationId): ActiveSpan? {
         val raw = prefs.getString(spanKey(id), null) ?: return null
-        val stored = runCatching { ArgusJson.decodeFromString(Stored.serializer(), raw) }.getOrNull()
-        val fingerprint = stored?.let { runCatching { ApprovalFingerprint(it.fingerprint) }.getOrNull() }
-        if (stored == null || fingerprint == null) {
-            prefs.edit().remove(spanKey(id)).commit()
-            return null
-        }
-        return ActiveSpan(id, fingerprint, stored.startedAtMillis, stored.records, stored.handled.toSet())
+        val span = runCatching {
+            val stored = ArgusJson.parseToJsonElement(raw).jsonObject
+            ActiveSpan(
+                automationId = id,
+                approvalFingerprint = ApprovalFingerprint(stored.getValue(FINGERPRINT).jsonPrimitive.content),
+                startedAtMillis = stored.getValue(STARTED_AT).jsonPrimitive.long,
+                records = ArgusJson.decodeFromJsonElement(records, stored.getValue(RECORDS)),
+                handled = stored.getValue(HANDLED).jsonArray.mapTo(linkedSetOf()) { it.jsonPrimitive.content },
+            )
+        }.getOrNull()
+        if (span == null) prefs.edit().remove(spanKey(id)).commit()
+        return span
     }
 
     private fun write(span: ActiveSpan): Boolean {
-        val stored = Stored(
-            fingerprint = span.approvalFingerprint.value,
-            startedAtMillis = span.startedAtMillis,
-            records = span.records,
-            handled = span.handled.sorted(),
-        )
-        return prefs.edit().putString(spanKey(span.automationId), ArgusJson.encodeToString(Stored.serializer(), stored)).commit()
+        val stored = buildJsonObject {
+            put(FINGERPRINT, span.approvalFingerprint.value)
+            put(STARTED_AT, span.startedAtMillis)
+            put(RECORDS, ArgusJson.encodeToJsonElement(records, span.records))
+            put(HANDLED, JsonArray(span.handled.sorted().map(::JsonPrimitive)))
+        }
+        return prefs.edit().putString(spanKey(span.automationId), stored.toString()).commit()
     }
 
     private fun spanKey(id: AutomationId) = SPAN_PREFIX + id.value
@@ -104,5 +110,9 @@ class PrefsSpanStore internal constructor(private val prefs: SharedPreferences) 
         internal const val PREFERENCES_NAME = "argus_spans"
         private const val SPAN_PREFIX = "span."
         private const val EXIT_PREFIX = "exit_at."
+        private const val FINGERPRINT = "fingerprint"
+        private const val STARTED_AT = "startedAtMillis"
+        private const val RECORDS = "records"
+        private const val HANDLED = "handled"
     }
 }

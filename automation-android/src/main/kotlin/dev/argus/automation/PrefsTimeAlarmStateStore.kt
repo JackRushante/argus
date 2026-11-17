@@ -3,16 +3,15 @@ package dev.argus.automation
 import android.content.Context
 import android.content.SharedPreferences
 import dev.argus.engine.model.ApprovalFingerprint
-import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.TimePrecision
-import kotlinx.serialization.Serializable
 
 /**
  * 0.8: [TimeAlarmStateStore] delle sveglie di FINE delle regole-intervallo, su SharedPreferences: lo schema Room
  * resta quello di prima (la tabella delle sveglie tiene una riga per regola, quella dell'inizio). Stessa semantica
- * del Room store: un record per regola, sostituito a ogni pianificazione. Un record illeggibile si scarta (il
- * reconcile successivo ripianifica da capo).
+ * del Room store: un record per regola, sostituito a ogni pianificazione, salvato come
+ * `impronta|evento|sveglia|precisione|modo|aggiornato`. Un record illeggibile si scarta (il reconcile successivo
+ * ripianifica da capo).
  */
 class PrefsTimeAlarmStateStore internal constructor(private val prefs: SharedPreferences) : TimeAlarmStateStore {
     constructor(context: Context) : this(
@@ -20,16 +19,6 @@ class PrefsTimeAlarmStateStore internal constructor(private val prefs: SharedPre
     )
 
     private val lock = Any()
-
-    @Serializable
-    private data class Stored(
-        val fingerprint: String,
-        val eventAtMillis: Long,
-        val wakeAtMillis: Long,
-        val precision: TimePrecision,
-        val mode: ScheduledAlarmMode,
-        val updatedAtMillis: Long,
-    )
 
     override suspend fun get(automationId: AutomationId): ScheduledTimeAlarm? = synchronized(lock) { read(automationId) }
 
@@ -40,15 +29,15 @@ class PrefsTimeAlarmStateStore internal constructor(private val prefs: SharedPre
 
     override suspend fun upsert(alarm: ScheduledTimeAlarm) {
         synchronized(lock) {
-            val stored = Stored(
-                fingerprint = alarm.approvalFingerprint.value,
-                eventAtMillis = alarm.eventAtMillis,
-                wakeAtMillis = alarm.wakeAtMillis,
-                precision = alarm.requestedPrecision,
-                mode = alarm.scheduledMode,
-                updatedAtMillis = alarm.updatedAtMillis,
-            )
-            check(prefs.edit().putString(PREFIX + alarm.automationId.value, ArgusJson.encodeToString(Stored.serializer(), stored)).commit()) {
+            val encoded = listOf(
+                alarm.approvalFingerprint.value,
+                alarm.eventAtMillis.toString(),
+                alarm.wakeAtMillis.toString(),
+                alarm.requestedPrecision.name,
+                alarm.scheduledMode.name,
+                alarm.updatedAtMillis.toString(),
+            ).joinToString(SEPARATOR)
+            check(prefs.edit().putString(PREFIX + alarm.automationId.value, encoded).commit()) {
                 "stato sveglia di fine non salvato"
             }
         }
@@ -61,15 +50,16 @@ class PrefsTimeAlarmStateStore internal constructor(private val prefs: SharedPre
     private fun read(id: AutomationId): ScheduledTimeAlarm? {
         val raw = prefs.getString(PREFIX + id.value, null) ?: return null
         val alarm = runCatching {
-            val stored = ArgusJson.decodeFromString(Stored.serializer(), raw)
+            val parts = raw.split(SEPARATOR)
+            require(parts.size == 6) { "record_invalid" }
             ScheduledTimeAlarm(
                 automationId = id,
-                approvalFingerprint = ApprovalFingerprint(stored.fingerprint),
-                eventAtMillis = stored.eventAtMillis,
-                wakeAtMillis = stored.wakeAtMillis,
-                requestedPrecision = stored.precision,
-                scheduledMode = stored.mode,
-                updatedAtMillis = stored.updatedAtMillis,
+                approvalFingerprint = ApprovalFingerprint(parts[0]),
+                eventAtMillis = parts[1].toLong(),
+                wakeAtMillis = parts[2].toLong(),
+                requestedPrecision = TimePrecision.valueOf(parts[3]),
+                scheduledMode = ScheduledAlarmMode.valueOf(parts[4]),
+                updatedAtMillis = parts[5].toLong(),
             )
         }.getOrNull()
         if (alarm == null) prefs.edit().remove(PREFIX + id.value).commit()
@@ -79,5 +69,6 @@ class PrefsTimeAlarmStateStore internal constructor(private val prefs: SharedPre
     companion object {
         internal const val PREFERENCES_NAME = "argus_span_exit_alarms"
         private const val PREFIX = "alarm."
+        private const val SEPARATOR = "|"
     }
 }

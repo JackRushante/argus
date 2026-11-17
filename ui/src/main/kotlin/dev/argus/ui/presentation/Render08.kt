@@ -223,12 +223,10 @@ internal object RuleSpanRender {
         val slots = linkedMapOf<String, SpanSlot>()
         var visited = 0
         while (pending.isNotEmpty() && visited++ < MAX_VISITED) {
+            // In profondità e in ordine: le azioni annidate contano dove stanno nella regola.
             when (val action = pending.removeFirst()) {
-                is Action.If -> {
-                    pending.addAll(action.then)
-                    pending.addAll(action.orElse)
-                }
-                is Action.While -> pending.addAll(action.body)
+                is Action.If -> pending.addAll(0, action.then + action.orElse)
+                is Action.While -> pending.addAll(0, action.body)
                 else -> SpanPolicy.slotOf(action)?.let { slots.putIfAbsent(it.key, it) }
             }
         }
