@@ -92,6 +92,7 @@ import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.components.ModelDescriptionNote
 import dev.argus.ui.components.AddLabelSheet
 import dev.argus.ui.components.ArgusIconButton
+import dev.argus.ui.components.BeforeUnlockCard
 import dev.argus.ui.components.RuleChangesCard
 import dev.argus.ui.components.RuleLabelsSection
 import dev.argus.ui.components.RuleShareSheet
@@ -267,6 +268,11 @@ fun AutomationDetailScreen(
                         onAdd = { showLabelSheet = true },
                         onRemove = callbacks::onRemoveLabel,
                     )
+                }
+
+                // 0.8: «Attiva anche prima dello sblocco», only for a saved rule that qualifies. Organisation too.
+                state.beforeUnlock?.let { option ->
+                    BeforeUnlockCard(enabled = option.enabled, onEnabledChange = callbacks::onSetBeforeUnlock)
                 }
 
                 if (state.recentRuns.isNotEmpty()) {
@@ -543,6 +549,8 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Pair<Color, Color>> {
         AuditKind.RULE_NEEDS_REVIEW -> Icons.Rounded.SyncProblem to (s.needsReview.bg to s.needsReview.fg)
         // 0.8: decisione del filtro chiamate.
         AuditKind.CALL_SCREENED -> Icons.Rounded.CallEnd to neutral
+        // 0.8: the option «active before unlock» switched itself off.
+        AuditKind.BEFORE_UNLOCK_OFF -> Icons.Rounded.Block to neutral
         AuditKind.FIRED -> when (row.outcome) {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to (s.armed.bg to s.armed.fg)
             LogOutcome.PARTIAL -> Icons.Rounded.CheckCircle to (s.pending.bg to s.pending.fg)

@@ -907,6 +907,9 @@ fun ArgusNavHost() {
                                         viewModel.onChangeApp(slot, packageName)
                                     override fun onAddLabel(label: String) = viewModel.onAddLabel(label)
                                     override fun onRemoveLabel(label: String) = viewModel.onRemoveLabel(label)
+                                    // 0.8: active before the first unlock (organisation, no new approval).
+                                    override fun onSetBeforeUnlock(enabled: Boolean) =
+                                        viewModel.onSetBeforeUnlock(enabled)
                                     override fun onOpenFullLog() {
                                         state.automationId?.let {
                                             switchTop(Routes.log(it, detail.name))

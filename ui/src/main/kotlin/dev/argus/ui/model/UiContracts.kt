@@ -458,7 +458,15 @@ data class AutomationDetailState(
     val share: RuleShareUi? = null,
     /** 0.8: «Prova a secco» si offre (bozza o regola salvata leggibile). */
     val dryRunAvailable: Boolean = false,
+    /**
+     * 0.8: «Attiva anche prima dello sblocco», offered only for a saved rule that qualifies; `null` = not offered.
+     * Organisation: it does not change the rule nor its approval.
+     */
+    val beforeUnlock: BeforeUnlockUi? = null,
 )
+
+/** 0.8: the option «Attiva anche prima dello sblocco» of a saved rule that qualifies. */
+data class BeforeUnlockUi(val enabled: Boolean)
 
 /** 0.7.2: le etichette di una regola nel dettaglio e quelle già in uso, da proporre per prime. */
 data class RuleLabelsUi(
@@ -565,6 +573,8 @@ interface AutomationDetailCallbacks {
     fun onCopyShare(stripPersonalData: Boolean) {}
     /** 0.8: apre «Prova a secco». Default no-op, host-owned. */
     fun onDryRun() {}
+    /** 0.8: switches «Attiva anche prima dello sblocco» on or off (no new approval). Default no-op. */
+    fun onSetBeforeUnlock(enabled: Boolean) {}
 }
 
 // --- 6.4 Log esecuzioni ---

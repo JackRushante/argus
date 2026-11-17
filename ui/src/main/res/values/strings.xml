@@ -789,4 +789,8 @@
     <string name="dry_run_tone_stopped">Stops</string>
     <string name="dry_run_tone_skipped">Does not happen</string>
     <string name="dry_run_tone_info">Program step</string>
+    <!-- 0.8: rules active before the first unlock (opt-in per rule, rule detail). -->
+    <string name="before_unlock_title">Also active before unlock</string>
+    <string name="before_unlock_body">After a restart, this rule also runs before you unlock the phone for the first time.</string>
+    <string name="before_unlock_weaker">To allow this, a copy of the rule is stored with weaker protection: it can be read before the first unlock.</string>
 </resources>

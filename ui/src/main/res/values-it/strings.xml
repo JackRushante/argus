@@ -788,4 +788,8 @@
     <string name="dry_run_tone_stopped">Si ferma</string>
     <string name="dry_run_tone_skipped">Non succede</string>
     <string name="dry_run_tone_info">Passo del programma</string>
+    <!-- 0.8: regole attive prima del primo sblocco (facoltative per regola, dettaglio). -->
+    <string name="before_unlock_title">Attiva anche prima dello sblocco</string>
+    <string name="before_unlock_body">Dopo un riavvio questa regola scatta anche prima che sblocchi il telefono per la prima volta.</string>
+    <string name="before_unlock_weaker">Per permetterlo, una sua copia è conservata con una protezione più debole: si può leggere prima del primo sblocco.</string>
 </resources>

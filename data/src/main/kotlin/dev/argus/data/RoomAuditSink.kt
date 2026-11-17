@@ -2,6 +2,7 @@ package dev.argus.data
 
 import dev.argus.data.dao.AuditDao
 import dev.argus.data.entities.AuditEntity
+import dev.argus.engine.directboot.BeforeUnlockCodes
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditSink
 
@@ -61,7 +62,12 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         // 0.8: solo l'esito del filtro chiamate, mai il numero.
         dev.argus.engine.runtime.AuditKind.CALL_SCREENED ->
             event.detail.takeIf { it in CALL_SCREENED_DETAILS } ?: ""
-        dev.argus.engine.runtime.AuditKind.FIRED,
+        // 0.8: why the option «active before unlock» switched itself off, a closed code.
+        dev.argus.engine.runtime.AuditKind.BEFORE_UNLOCK_OFF ->
+            event.detail.takeIf { it in BeforeUnlockCodes.OFF_DETAILS } ?: ""
+        // 0.8: a fire that happened before the first unlock keeps its marker; nothing else passes.
+        dev.argus.engine.runtime.AuditKind.FIRED ->
+            event.detail.takeIf { it == BeforeUnlockCodes.FIRED } ?: ""
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE,
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE -> ""
     }

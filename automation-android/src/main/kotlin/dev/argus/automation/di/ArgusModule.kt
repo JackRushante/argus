@@ -40,6 +40,14 @@ import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
+import dev.argus.automation.directboot.AndroidLockedAlarms
+import dev.argus.automation.directboot.BeforeUnlockAwareTimeAlarmRuntime
+import dev.argus.automation.directboot.BeforeUnlockCopyWriter
+import dev.argus.automation.directboot.BeforeUnlockHandover
+import dev.argus.automation.directboot.BeforeUnlockOptInStore
+import dev.argus.automation.directboot.DirectBootStorage
+import dev.argus.automation.directboot.LockedBoot
+import dev.argus.automation.directboot.PrefsBeforeUnlockOptInStore
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.DeferredReplyCipher
 import dev.argus.automation.DeferredReplyManager
@@ -1628,10 +1636,58 @@ object ArgusModule {
         ),
     )
 
+    /**
+     * 0.8: every use of the time alarms waits until what the rules did before the first unlock is in the Log, so a
+     * due alarm from before the restart is not run again for an occurrence the locked path already handled.
+     */
     @Provides
     @Singleton
-    fun timeAlarmRuntime(coordinator: TimeAlarmCoordinator, exit: SpanExitTimeAlarms): TimeAlarmRuntime =
-        CoordinatorTimeAlarmRuntime(coordinator, exit.coordinator)
+    fun timeAlarmRuntime(
+        coordinator: TimeAlarmCoordinator,
+        exit: SpanExitTimeAlarms,
+        handover: BeforeUnlockHandover,
+    ): TimeAlarmRuntime =
+        BeforeUnlockAwareTimeAlarmRuntime(CoordinatorTimeAlarmRuntime(coordinator, exit.coordinator), handover)
+
+    // --- 0.8: rules active before the first unlock -------------------------------------------------------
+
+    @Provides
+    @Singleton
+    fun directBootStorage(@ApplicationContext context: Context): DirectBootStorage = DirectBootStorage(context)
+
+    @Provides
+    @Singleton
+    fun beforeUnlockOptIns(@ApplicationContext context: Context): BeforeUnlockOptInStore =
+        PrefsBeforeUnlockOptInStore(context)
+
+    @Provides
+    @Singleton
+    fun beforeUnlockHandover(
+        storage: DirectBootStorage,
+        store: AutomationStore,
+        journal: ExecutionJournal,
+        audit: AuditSink,
+        state: TimeAlarmStateStore,
+        @ApplicationContext context: Context,
+    ): BeforeUnlockHandover = BeforeUnlockHandover(
+        storage = storage,
+        store = store,
+        journal = journal,
+        audit = audit,
+        timeAlarms = state,
+        alarms = AndroidLockedAlarms(context),
+        bootCount = { LockedBoot.bootCount(context) },
+    )
+
+    @Provides
+    @Singleton
+    fun beforeUnlockCopyWriter(
+        store: AutomationStore,
+        optIns: BeforeUnlockOptInStore,
+        storage: DirectBootStorage,
+        audit: AuditSink,
+        @ApplicationScope scope: CoroutineScope,
+    ): BeforeUnlockCopyWriter = BeforeUnlockCopyWriter(store, optIns, storage, audit, System::currentTimeMillis, scope)
 
     @Provides
     @Singleton
@@ -1648,6 +1704,7 @@ object ArgusModule {
         foregroundLauncher: ReceiverWorkLauncher,
         calendar: CalendarTriggerRuntime,
         exitTimeAlarms: SpanExitTimeAlarms,
+        handover: BeforeUnlockHandover,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1662,6 +1719,7 @@ object ArgusModule {
         foregroundLauncher,
         calendar,
         exitTimeAlarms = exitTimeAlarms.coordinator,
+        beforeTimeReconcile = handover::ensureImported,
     )
 
     /**

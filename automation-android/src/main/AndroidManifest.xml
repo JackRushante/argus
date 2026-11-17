@@ -190,6 +190,29 @@
             </intent-filter>
         </receiver>
 
+        <!-- 0.8, rules active before the first unlock (opt-in per rule). The ONLY direct-boot-aware components of
+             Argus, in their own process: there ArgusApplication skips its whole start-up (no Hilt graph, Room,
+             preferences, Keystore or Shizuku), and they read only device-encrypted storage. Not exported: the boot
+             broadcast comes from the system (a protected broadcast), the alarm from Argus's own explicit, immutable
+             PendingIntent; both receivers check the action anyway. -->
+        <receiver
+            android:name="dev.argus.automation.directboot.LockedBootReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":locked">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="dev.argus.automation.directboot.LockedAlarmReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":locked" />
+
         <!-- 0.8: sveglia per regola del trigger calendario; intent esplicito, nessuna azione esterna. -->
         <receiver
             android:name="dev.argus.automation.calendar.CalendarAlarmReceiver"

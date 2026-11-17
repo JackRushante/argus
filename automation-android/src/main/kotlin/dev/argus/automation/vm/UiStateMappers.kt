@@ -5,6 +5,7 @@ import dev.argus.automation.privileged.ScreenshotLogDetail
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
+import dev.argus.engine.directboot.BeforeUnlockCodes
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.Action
@@ -174,7 +175,13 @@ internal fun AuditLogRecord.toLogRow(
         outcome = outcome,
         // 0.8: la fine di una regola-intervallo (valori rimessi e azioni di fine) si distingue dall'inizio.
         summary = auditSummary(this, language).let { text ->
-            if (kind == AuditKind.FIRED && detail == SpanCodes.EXIT) language.pick("End: ", "Fine: ") + text else text
+            when {
+                kind == AuditKind.FIRED && detail == SpanCodes.EXIT -> language.pick("End: ", "Fine: ") + text
+                // 0.8: ran before the first unlock, imported into the Log after unlock.
+                kind == AuditKind.FIRED && detail == BeforeUnlockCodes.FIRED ->
+                    language.pick("Before unlock: ", "Prima dello sblocco: ") + text
+                else -> text
+            }
         },
         expandedDetail = actions.takeIf(List<ActionResultEntity>::isNotEmpty)
             ?.map { actionDetail(it, language) },
@@ -198,6 +205,8 @@ private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
         kind == AuditKind.RULE_ENABLED || kind == AuditKind.RULE_DELETED -> LogOutcome.SUCCESS
     // 0.8: decisione del filtro chiamate, un evento informativo come il ciclo di vita.
     kind == AuditKind.CALL_SCREENED -> LogOutcome.SUCCESS
+    // 0.8: the option «active before unlock» switched itself off: informative, like the lifecycle.
+    kind == AuditKind.BEFORE_UNLOCK_OFF -> LogOutcome.SUCCESS
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
     this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
     // Risposta AI bloccata dal budget: non e' un successo, e' un avviso (ambra).
@@ -354,6 +363,18 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
             "Il filtro chiamate non ha deciso in tempo: la chiamata ha squillato",
         )
         else -> l.pick("Incoming call screened", "Chiamata in arrivo filtrata")
+    }
+    // 0.8: the option «active before unlock» switched itself off.
+    AuditKind.BEFORE_UNLOCK_OFF -> when (record.detail) {
+        BeforeUnlockCodes.OFF_RULE_CHANGED -> l.pick(
+            "Before unlock: option switched off, the rule changed",
+            "Prima dello sblocco: opzione spenta, la regola è cambiata",
+        )
+        BeforeUnlockCodes.OFF_NOT_QUALIFYING -> l.pick(
+            "Before unlock: option switched off, the rule no longer qualifies",
+            "Prima dello sblocco: opzione spenta, la regola non è più ammessa",
+        )
+        else -> l.pick("Before unlock: option switched off", "Prima dello sblocco: opzione spenta")
     }
 }
 
