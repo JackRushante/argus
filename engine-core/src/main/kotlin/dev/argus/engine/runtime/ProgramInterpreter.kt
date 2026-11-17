@@ -121,9 +121,27 @@ class ProgramQuestion(
      * farlo proseguire con [ProgramInterpreter.resume] se il processo muore prima della risposta.
      */
     val continuation: ProgramContinuation? = null,
+    /** 0.8 «Prova a secco»: le parti di [prompt] che vengono da un valore TAINTED (vedi [ResolvedProgramAction.taintedRanges]). */
+    val promptTainted: List<IntRange> = emptyList(),
 ) {
     override fun toString(): String =
         "ProgramQuestion(path=${path.value}, prompt=<redacted>, choices=${choices.size}, timeoutMs=$timeoutMs)"
+}
+
+/**
+ * 0.8 «Prova a secco»: osserva, in ordine, ciò che il programma decide (le condizioni di `if` e `while`) e ogni
+ * passo registrato. Solo osservabilità: non cambia l'esito. Default: nessun osservatore.
+ */
+interface ProgramObserver {
+    /** La condizione dell'`if` o del `while` (con [loop]) in [path] è stata valutata con [result]. */
+    fun onCondition(path: ActionPath, loop: Boolean, result: ConditionEvaluator.Result) {}
+
+    /** Un passo del programma (foglia eseguita, bloccata o fallita, attesa, domanda) è stato registrato. */
+    fun onStep(step: ProgramStep) {}
+
+    companion object {
+        val NONE: ProgramObserver = object : ProgramObserver {}
+    }
 }
 
 sealed interface QuestionOutcome {
@@ -210,6 +228,8 @@ class ProgramInterpreter(
     private val locale: () -> Locale = ClockVariable::appLocale,
     /** 0.8: le domande `ask` (notifica con un pulsante per scelta). */
     private val questions: ProgramQuestions = ProgramQuestions.UNAVAILABLE,
+    /** 0.8 «Prova a secco»: chi osserva le decisioni e i passi (mai un effetto). */
+    private val observer: ProgramObserver = ProgramObserver.NONE,
 ) {
     suspend fun execute(
         trigger: Trigger,
@@ -389,7 +409,7 @@ class ProgramInterpreter(
                                 else -> return stop(ASK_RESUME_INVALID, path)
                             }
                         } else {
-                            when (evaluate(action.condition, path)) {
+                            when (evaluate(action.condition, path).also { observer.onCondition(path, false, it) }) {
                                 ConditionEvaluator.Result.MET -> action.then to "then"
                                 ConditionEvaluator.Result.NOT_MET -> action.orElse to "else"
                                 ConditionEvaluator.Result.STATE_UNAVAILABLE ->
@@ -429,7 +449,7 @@ class ProgramInterpreter(
                         try {
                             while (iteration <= effective) {
                                 if (!skipCheck) {
-                                    when (evaluate(action.condition, path)) {
+                                    when (evaluate(action.condition, path).also { observer.onCondition(path, true, it) }) {
                                         ConditionEvaluator.Result.NOT_MET -> break
                                         ConditionEvaluator.Result.STATE_UNAVAILABLE ->
                                             return stop("condition_state_unavailable", path)
@@ -560,14 +580,14 @@ class ProgramInterpreter(
          * predefinita, altrimenti il programma si ferma con [ASK_TIMEOUT].
          */
         private suspend fun runAsk(action: Action.Ask, path: ActionPath): Boolean {
-            val resolved = when (val resolution = interpolator.resolve(action, scope)) {
+            val resolvedLeaf = when (val resolution = interpolator.resolve(action, scope)) {
                 is ActionResolution.Blocked -> {
                     record(path, action, ActionResult.Failure(resolution.code))
                     return stop(resolution.code, path)
                 }
-                is ActionResolution.Resolved -> resolution.value.action as? Action.Ask
-                    ?: return stop("resolved_action_invalid", path)
+                is ActionResolution.Resolved -> resolution.value
             }
+            val resolved = resolvedLeaf.action as? Action.Ask ?: return stop("resolved_action_invalid", path)
             currentPath = path
             val continuation = ProgramContinuation(
                 askPath = path,
@@ -577,7 +597,16 @@ class ProgramInterpreter(
                 startedAtMillis = startedAtMillis,
             )
             val outcome = try {
-                questions.ask(ProgramQuestion(path, resolved.prompt, action.choices, action.timeoutMs, continuation))
+                questions.ask(
+                    ProgramQuestion(
+                        path,
+                        resolved.prompt,
+                        action.choices,
+                        action.timeoutMs,
+                        continuation,
+                        promptTainted = resolvedLeaf.taintedRanges["prompt"].orEmpty(),
+                    ),
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -725,6 +754,7 @@ class ProgramInterpreter(
         private suspend fun record(path: ActionPath, action: Action, result: ActionResult) {
             val step = ProgramStep(path, action.journalType(), result)
             steps += step
+            observer.onStep(step)
             val outcome = result.journalOutcome()
             // Una voce non riuscita (FAILED) o ancora aperta (SUBMITTED/DEFERRED) si scrive sempre: la
             // risoluzione asincrona delle azioni generative rilegge proprio quelle righe.
