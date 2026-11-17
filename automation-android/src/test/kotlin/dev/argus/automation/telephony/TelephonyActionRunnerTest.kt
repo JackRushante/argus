@@ -34,6 +34,7 @@ class TelephonyActionRunnerTest {
         var foreground = true
         var resolved: Set<String> = emptySet()
         var resolvable = true
+        var queryFails = false
         val sent = mutableListOf<Pair<String, String>>()
         val calls = mutableListOf<String>()
         val broadcasts = mutableListOf<Action.SendIntent>()
@@ -49,7 +50,8 @@ class TelephonyActionRunnerTest {
             if (!foreground) throw ActivityStartBlockedException()
             calls += number
         }
-        override fun receivers(intent: Action.SendIntent): Set<String> = resolved
+        override fun receivers(intent: Action.SendIntent): Set<String> =
+            if (queryFails) throw IllegalStateException("package manager") else resolved
         override fun sendBroadcast(intent: Action.SendIntent) {
             broadcasts += intent
         }
@@ -67,7 +69,7 @@ class TelephonyActionRunnerTest {
     private var now = 10_000_000L
     private val runner = TelephonyActionRunner(
         surface = surface,
-        limiter = TelephonyRateLimiter(InMemoryLedgerStore()) { now },
+        limiter = TelephonyRateLimiter(InMemoryLedgerStore()) { ClockReading(now, 1, now) },
         audit = object : AuditSink {
             override suspend fun record(e: AuditEvent) {
                 audits += e
@@ -185,6 +187,30 @@ class TelephonyActionRunnerTest {
         )
         assertEquals(emptyList(), privileged)
         assertEquals(emptyList(), surface.broadcasts)
+    }
+
+    @Test
+    fun `a broadcast without package that argus itself would receive is refused, and so is any doubt`() = runTest {
+        // Il receiver di Argus (anche non esportato o registrato a runtime) compare tra chi lo riceverebbe.
+        surface.resolved = setOf("com.example.app", "dev.argus")
+        val implicit = Action.SendIntent(IntentKind.BROADCAST, action = "android.intent.action.SCREEN_ON")
+        assertEquals(ActionResult.Failure("intent_target_forbidden"), runner.sendIntent(implicit, ctx, true))
+        // Una variante di Argus o un nome di Argus in qualunque grafia.
+        surface.resolved = setOf("dev.argus.debug")
+        assertEquals(ActionResult.Failure("intent_target_forbidden"), runner.sendIntent(implicit, ctx, true))
+        assertEquals(
+            ActionResult.Failure("intent_target_forbidden"),
+            runner.sendIntent(Action.SendIntent(IntentKind.BROADCAST, action = "Dev.Argus.RUN"), ctx, true),
+        )
+        // Se non si sa chi lo riceverebbe, non parte.
+        surface.resolved = emptySet()
+        surface.queryFails = true
+        assertEquals(ActionResult.Failure("intent_target_forbidden"), runner.sendIntent(implicit, ctx, true))
+        assertEquals(emptyList(), surface.broadcasts)
+        // Un componente esplicito di un'altra app non ha bisogno della risoluzione.
+        val explicit = Action.SendIntent(IntentKind.BROADCAST, pkg = "com.example.app", cls = "com.example.app.Rx")
+        assertEquals(ActionResult.Success, runner.sendIntent(explicit, ctx, true))
+        assertEquals(listOf(explicit), surface.broadcasts)
     }
 
     @Test

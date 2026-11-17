@@ -1,12 +1,14 @@
 package dev.argus.automation.telephony
 
 import android.Manifest
+import android.app.NotificationManager
 import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
@@ -101,8 +103,9 @@ class AndroidTelephonySurface(context: Context) : TelephonySurface {
             IntentKind.BROADCAST -> packages.queryBroadcastReceivers(android, 0).map { it.activityInfo.packageName }
             IntentKind.ACTIVITY -> packages.queryIntentActivities(android, 0).map { it.activityInfo.packageName }
             IntentKind.SERVICE -> packages.queryIntentServices(android, 0).map { it.serviceInfo.packageName }
-        }
-        return resolved.toSet()
+        }.toMutableSet()
+        if (reachesOwnRuntimeReceiver(intent)) resolved += ownPackage
+        return resolved
     }
 
     override fun sendBroadcast(intent: Action.SendIntent) {
@@ -125,6 +128,27 @@ class AndroidTelephonySurface(context: Context) : TelephonySurface {
         ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
 
     companion object {
+        /**
+         * Le azioni dei receiver che Argus registra a runtime (`registerReceiver`): il PackageManager non li
+         * conosce, quindi un broadcast senza package con una di queste azioni si considera rivolto ad Argus.
+         * Chi aggiunge un `registerReceiver` aggiunge qui le sue azioni (OwnRuntimeReceiversTest lo ricorda).
+         */
+        val OWN_RUNTIME_RECEIVER_ACTIONS: Set<String> = setOf(
+            Intent.ACTION_SCREEN_ON,
+            Intent.ACTION_SCREEN_OFF,
+            Intent.ACTION_USER_PRESENT,
+            Intent.ACTION_BATTERY_CHANGED,
+            Intent.ACTION_POWER_CONNECTED,
+            Intent.ACTION_POWER_DISCONNECTED,
+            NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED,
+            AudioManager.RINGER_MODE_CHANGED_ACTION,
+        )
+
+        /** Un broadcast senza package raggiungerebbe un receiver runtime di Argus (azione confrontata per intero). */
+        fun reachesOwnRuntimeReceiver(intent: Action.SendIntent): Boolean =
+            intent.kind == IntentKind.BROADCAST && intent.pkg == null &&
+                OWN_RUNTIME_RECEIVER_ACTIONS.any { it.equals(intent.action, ignoreCase = true) }
+
         fun hasTelephony(context: Context): Boolean = runCatching {
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
         }.getOrDefault(false)

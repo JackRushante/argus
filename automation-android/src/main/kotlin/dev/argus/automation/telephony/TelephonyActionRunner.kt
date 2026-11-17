@@ -7,7 +7,6 @@ import dev.argus.automation.base.DeferredOpenTarget
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.IntentExtraType
 import dev.argus.engine.model.IntentKind
-import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.AuditEvent
@@ -32,7 +31,11 @@ interface TelephonySurface {
     /** Avvia la chiamata. Da background lancia [ActivityStartBlockedException]. */
     fun placeCall(number: String)
 
-    /** I package che riceverebbero l'Intent (implicito) come [kind]. Lancia se non si possono leggere. */
+    /**
+     * I package che riceverebbero l'Intent (implicito) come [kind]. Lancia se non si possono leggere. Per un
+     * broadcast senza package comprende Argus anche quando lo riceverebbe un SUO receiver registrato a runtime
+     * (che il PackageManager non elenca e che, essendo dello stesso uid, riceve anche se non esportato).
+     */
     fun receivers(intent: Action.SendIntent): Set<String>
     fun sendBroadcast(intent: Action.SendIntent)
 
@@ -125,11 +128,13 @@ class TelephonyActionRunner(
 
     /**
      * Argus non è mai un bersaglio: il package reale (anche con un suffisso di variante) e, per un Intent
-     * implicito, ogni componente di Argus che lo riceverebbe. Se non si riesce a saperlo si rifiuta.
+     * implicito, ogni componente di Argus che lo riceverebbe, esportato o no (un broadcast che Argus stesso
+     * invia raggiunge anche i suoi receiver non esportati). Se non si riesce a saperlo si rifiuta.
      */
     private fun targetsArgus(action: Action.SendIntent): Boolean {
         fun isArgus(pkg: String) = pkg == surface.ownPackage || pkg.startsWith("${surface.ownPackage}.") ||
-            PrivilegedActionPolicy.isArgus(pkg)
+            TelephonyActionPolicy.isArgusName(pkg)
+        if (action.cls?.let(::isArgus) == true) return true
         if (action.pkg?.let(::isArgus) == true) return true
         if (action.pkg != null && action.cls != null) return false
         val receivers = try {
