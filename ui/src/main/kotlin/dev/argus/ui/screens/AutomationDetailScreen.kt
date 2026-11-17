@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SyncProblem
@@ -286,6 +287,11 @@ fun AutomationDetailScreen(
 
                 if (showRunNowRow(state)) {
                     RunNowCard(state, onRunNow = { if (state.canRunNow) confirmRunNow = true })
+                }
+
+                // 0.8: «Prova a secco», per una bozza come per una regola salvata. Non esegue nulla.
+                if (state.dryRunAvailable) {
+                    DryRunCard(onDryRun = callbacks::onDryRun)
                 }
 
                 Spacer(Modifier.height(ArgusSpacing.Unit))
@@ -787,6 +793,30 @@ private fun RunNowCard(state: AutomationDetailState, onRunNow: () -> Unit) {
             // Il motivo è testo visibile sotto il pulsante, mai un tooltip (regola 2 dei componenti).
             disabledReason = state.runNowBlockedReason ?: stringResource(R.string.rda_ap_run_now_fallback),
         )
+    }
+}
+
+/** 0.8: «Prova a secco» apre la simulazione di un'esecuzione: niente parte, niente va nel Log. */
+@Composable
+private fun DryRunCard(onDryRun: () -> Unit) {
+    ArgusCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(ArgusRadius.Lg),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = ArgusSpacing.Medium),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small)) {
+            ArgusButton(
+                text = stringResource(R.string.dry_run_action),
+                onClick = onDryRun,
+                style = ButtonStyle.Outlined,
+                icon = Icons.Rounded.Science,
+            )
+            Text(
+                stringResource(R.string.dry_run_action_hint),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 
@@ -1306,6 +1336,7 @@ private fun DetailArmedStatsPreview() {
             previewArmedDetail.copy(
                 banner = EngineBanner.NONE,
                 canRunNow = true,
+                dryRunAvailable = true,
                 runNowBlockedReason = null,
                 stats = RuleStatsUi(
                     last7Days = RuleStatsWindow(fires = 3, succeeded = 2, failed = 1),

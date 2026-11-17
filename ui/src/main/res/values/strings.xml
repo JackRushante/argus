@@ -758,4 +758,35 @@
     <!-- Issue #21: copy a chat message -->
     <string name="chat_message_copy_action">Copy message</string>
     <string name="chat_message_copied">Message copied</string>
+    <!-- 0.8: dry run -->
+    <string name="dry_run_title">Dry run</string>
+    <string name="dry_run_action">Dry run</string>
+    <string name="dry_run_action_hint">Shows step by step what one run would do, without running anything.</string>
+    <string name="dry_run_banner">Simulation: nothing is executed. The conditions are read from the phone right now.</string>
+    <string name="dry_run_event_header">Sample event</string>
+    <string name="dry_run_field_sender">Sender</string>
+    <string name="dry_run_field_title">Title</string>
+    <string name="dry_run_field_text">Message text</string>
+    <string name="dry_run_field_number">Number</string>
+    <string name="dry_run_field_name">Network or device</string>
+    <string name="dry_run_field_mode">New mode</string>
+    <string name="dry_run_no_fields">This trigger carries no data to type: the dry run uses its event as it comes.</string>
+    <string name="dry_run_verified_scan">Verified scan</string>
+    <string name="dry_run_phase_label">What to simulate</string>
+    <string name="dry_run_phase_start">The start</string>
+    <string name="dry_run_phase_end">The end</string>
+    <string name="dry_run_run_again">Try again</string>
+    <string name="dry_run_steps_header">What would happen</string>
+    <string name="dry_run_shell_label">shell command, in full</string>
+    <string name="dry_run_answer_label">Simulated answer</string>
+    <string name="dry_run_footer">This dry run does not appear in the Log: it does not count as a run and does not use up the cooldown.</string>
+    <string name="dry_run_not_simulated">Not simulated: the hourly caps on SMS and calls, the AI budget, who would receive an implicit intent.</string>
+    <string name="dry_run_missing">This rule is no longer available.</string>
+    <string name="dry_run_tone_ok">Would happen</string>
+    <string name="dry_run_tone_ai">AI step</string>
+    <string name="dry_run_tone_ask">Waits for you</string>
+    <string name="dry_run_tone_blocked">Blocked</string>
+    <string name="dry_run_tone_stopped">Stops</string>
+    <string name="dry_run_tone_skipped">Does not happen</string>
+    <string name="dry_run_tone_info">Program step</string>
 </resources>

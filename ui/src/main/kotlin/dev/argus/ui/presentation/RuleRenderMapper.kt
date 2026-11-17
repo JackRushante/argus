@@ -453,6 +453,15 @@ object RuleRenderMapper {
         is Trigger.UserModeChanged -> Trigger08Render.userModeChanged(t, l)
     }
 
+    // 0.8 «Prova a secco»: le stesse rese dai tipi, una riga o un'azione alla volta (DryRunRenderMapper).
+    internal fun triggerLineOf(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String =
+        triggerLine(t, conversationLabels, l)
+
+    internal fun conditionLinesOf(c: Condition, l: RenderLanguage, loop: Boolean = false): List<String> =
+        flattenConditions(c, 0, l, if (loop) ConditionLead.WHILE else ConditionLead.ONLY_IF)
+
+    internal fun actionRowOf(a: Action, l: RenderLanguage): ActionRow = actionRow(a, l)
+
     /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */
     fun whenPrefix(language: RenderLanguage = RenderLanguage.system()): String =
         language.pick("When: ", "Quando: ")
