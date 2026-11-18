@@ -1230,9 +1230,11 @@ class AutomationDetailViewModelTest {
         val pauses = MemoryLabelPause()
         val directory = RoomRuleLabelDirectory(labelStore, pauses)
         val viewModel = viewModel("lab1", store, DetailAuditRecorder(), RenderLanguage.EN, ruleLabels = directory)
-        awaitUntil("riga etichette") { viewModel.state.value.detail?.labels != null }
+        // The row first renders from the empty initial snapshot; the directory's first emission follows.
+        awaitUntil("le etichette in uso si propongono") {
+            viewModel.state.value.detail?.labels?.existing == listOf("Lavoro")
+        }
         assertEquals(emptyList(), viewModel.state.value.detail?.labels?.labels)
-        assertEquals(listOf("Lavoro"), viewModel.state.value.detail?.labels?.existing, "le etichette in uso si propongono")
 
         viewModel.onAddLabel("Casa")
         awaitUntil("etichetta aggiunta") { viewModel.state.value.detail?.labels?.labels?.size == 1 }
