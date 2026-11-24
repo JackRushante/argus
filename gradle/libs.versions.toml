@@ -18,7 +18,7 @@ androidxTestCore = "1.6.1"
 androidxTestExtJunit = "1.2.1"
 androidxTestRunner = "1.6.2"
 shizuku = "13.1.5"
-hilt = "2.58"
+hilt = "2.60.1"
 hiltJetpack = "1.3.0"
 # QR code of a shared rule (0.7.2): ZXing core, encoder only (Apache-2.0, pure Java)
 zxing = "3.5.4"
