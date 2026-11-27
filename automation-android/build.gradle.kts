@@ -45,7 +45,7 @@ dependencies {
     // 0.4.1: chiamate HTTP verso un server locale finto (https/loopback, redirect, limiti).
     testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
     testImplementation(libs.androidx.test.core)
-    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.3")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:6.1.3")
 
     androidTestImplementation(libs.junit4)
     androidTestImplementation(libs.androidx.test.core)
