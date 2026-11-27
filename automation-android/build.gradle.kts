@@ -33,7 +33,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.hilt.android)
     // CliBridgeTransport espone OkHttpClient nel costruttore pubblico: dipendenza compile diretta.
-    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     ksp(libs.hilt.compiler)
 
     testImplementation(kotlin("test-junit5"))
@@ -43,7 +43,7 @@ dependencies {
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
     // 0.4.1: chiamate HTTP verso un server locale finto (https/loopback, redirect, limiti).
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
     testImplementation(libs.androidx.test.core)
     testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.3")
 
