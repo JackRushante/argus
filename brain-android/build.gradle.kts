@@ -26,7 +26,7 @@ dependencies {
     implementation(project(":engine-core"))
 
     // Bridge Hermes via OkHttp (dep diretta: evito di toccare il catalog condiviso mid-flight).
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
 
     // engine-core dichiara serialization/coroutines come `implementation` (non transitivi): li ridichiaro.
     implementation(libs.kotlinx.serialization.json)
@@ -35,7 +35,7 @@ dependencies {
     // Unit test puri JVM su OkHttp MockWebServer (nessun device/Robolectric necessario).
     testImplementation(kotlin("test-junit5"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
-    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.1")
 
     androidTestImplementation(libs.junit4)
     androidTestImplementation(libs.androidx.test.core)
