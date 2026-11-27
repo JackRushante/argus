@@ -27,7 +27,7 @@ dependencies {
     implementation(libs.zxing.core)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
 }
 
 tasks.withType<Test> { useJUnitPlatform() }

@@ -23,7 +23,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(kotlin("test-junit5"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testImplementation(libs.kotlinx.coroutines.test)
 
     androidTestImplementation(libs.junit4)
