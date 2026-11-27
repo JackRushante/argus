@@ -4,6 +4,29 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Held until the move to Android Gradle Plugin 9: these releases need AGP 9.1+
+    # (or compileSdk 37, or for Gradle drop APIs AGP 8 uses). Remove together with the migration,
+    # which must also re-check the F-Droid reproducible build.
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.android.application"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.android.library"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.compose:compose-bom"
+        versions: [">=2026.11.01"]
+      - dependency-name: "androidx.navigation:*"
+        versions: [">=2.10.0"]
+      - dependency-name: "androidx.hilt:*"
+        versions: [">=1.4.0"]
+      - dependency-name: "com.google.dagger*"
+        versions: [">=2.60"]
+      # OkHttp 5.5+ needs compileSdk 37, past what AGP 8.13 supports.
+      - dependency-name: "com.squareup.okhttp3:*"
+        versions: [">=5.5.0"]
     groups:
       # Kotlin, its Gradle plugins (including the Compose compiler plugin) and KSP move together:
       # each KSP release is built for one Kotlin version.
