@@ -34,7 +34,7 @@ dependencies {
 
     // Unit test puri JVM su OkHttp MockWebServer (nessun device/Robolectric necessario).
     testImplementation(kotlin("test-junit5"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
 
     androidTestImplementation(libs.junit4)
